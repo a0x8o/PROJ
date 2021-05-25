@@ -819,7 +819,9 @@ std::vector<std::string> DatabaseContext::Private::getDatabaseStructure() {
                                        : "db_0.");
     const auto sqlBegin("SELECT sql||';' FROM " + dbNamePrefix +
                         "sqlite_master WHERE type = ");
-    const char *const objectTypes[] = {"'table'", "'view'", "'trigger'"};
+    const char *const objectTypes[] = {"'table' AND "
+                                       "name NOT LIKE 'sqlite_stat%'",
+                                       "'view'", "'trigger'"};
     std::vector<std::string> res;
     for (const auto &objectType : objectTypes) {
         const auto sqlRes = run(sqlBegin + objectType);
@@ -846,7 +848,8 @@ void DatabaseContext::Private::attachExtraDatabases(
     assert(sqlite_handle_);
 
     auto tables =
-        run("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')");
+        run("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') "
+            "AND name NOT LIKE 'sqlite_stat%'");
     std::map<std::string, std::vector<std::string>> tableStructure;
     for (const auto &rowTable : tables) {
         auto tableName = rowTable[0];
@@ -3249,9 +3252,9 @@ DatabaseContext::getTransformationsForGridName(
     const DatabaseContextNNPtr &databaseContext, const std::string &gridName) {
     auto sqlRes = databaseContext->d->run(
         "SELECT auth_name, code FROM grid_transformation "
-        "WHERE grid_name = ? OR grid_name = "
+        "WHERE grid_name = ? OR grid_name IN "
         "(SELECT original_grid_name FROM grid_alternatives "
-        "WHERE proj_grid_name = ?)",
+        "WHERE proj_grid_name = ?) ORDER BY auth_name, code",
         {gridName, gridName});
     std::vector<operation::CoordinateOperationNNPtr> res;
     for (const auto &row : sqlRes) {
