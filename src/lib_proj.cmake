@@ -138,6 +138,7 @@ set(SRC_LIBPROJ_PROJECTIONS
   projections/putp6.cpp
   projections/qsc.cpp
   projections/robin.cpp
+  projections/s2.cpp
   projections/sch.cpp
   projections/sts.cpp
   projections/urm5.cpp
@@ -398,7 +399,8 @@ target_link_libraries(proj PRIVATE ${SQLITE3_LIBRARY})
 
 if(NLOHMANN_JSON STREQUAL "external")
   target_compile_definitions(proj PRIVATE EXTERNAL_NLOHMANN_JSON)
-  target_link_libraries(proj PRIVATE nlohmann_json::nlohmann_json)
+  target_link_libraries(proj
+    PRIVATE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 endif()
 
 if(TIFF_ENABLED)
