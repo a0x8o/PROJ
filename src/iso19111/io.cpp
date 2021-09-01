@@ -1239,6 +1239,7 @@ struct WKTParser::Private {
     std::vector<double> toWGS84Parameters_{};
     std::string datumPROJ4Grids_{};
     bool esriStyle_ = false;
+    bool maybeEsriStyle_ = false;
     DatabaseContextPtr dbContext_{};
 
     static constexpr int MAX_PROPERTY_SIZE = 1024;
@@ -2203,17 +2204,39 @@ GeodeticReferenceFrameNNPtr WKTParser::Private::buildGeodeticReferenceFrame(
     // Remap GDAL WGS_1984 to EPSG v9 "World Geodetic System 1984" official
     // name.
     // Also remap EPSG v10 datum ensemble names to non-ensemble EPSG v9
+    bool nameSet = false;
     if (name == "WGS_1984" || name == "World Geodetic System 1984 ensemble") {
+        nameSet = true;
         properties.set(IdentifiedObject::NAME_KEY,
                        GeodeticReferenceFrame::EPSG_6326->nameStr());
     } else if (name == "European Terrestrial Reference System 1989 ensemble") {
+        nameSet = true;
         properties.set(IdentifiedObject::NAME_KEY,
                        "European Terrestrial Reference System 1989");
-    } else if (starts_with(name, "D_")) {
+    }
+
+    // If we got hints this might be a ESRI WKT, then check in the DB to
+    // confirm
+    std::string officialName;
+    std::string authNameFromAlias;
+    std::string codeFromAlias;
+    if (!nameSet && maybeEsriStyle_ && dbContext_ &&
+        !(starts_with(name, "D_") || esriStyle_)) {
+        std::string outTableName;
+        auto authFactory =
+            AuthorityFactory::create(NN_NO_CHECK(dbContext_), std::string());
+        officialName = authFactory->getOfficialNameFromAlias(
+            name, "geodetic_datum", "ESRI", false, outTableName,
+            authNameFromAlias, codeFromAlias);
+        if (!officialName.empty()) {
+            maybeEsriStyle_ = false;
+            esriStyle_ = true;
+        }
+    }
+
+    if (!nameSet && (starts_with(name, "D_") || esriStyle_)) {
         esriStyle_ = true;
         const char *tableNameForAlias = nullptr;
-        std::string authNameFromAlias;
-        std::string codeFromAlias;
         if (name == "D_WGS_1984") {
             name = "World Geodetic System 1984";
             authNameFromAlias = Identifier::EPSG;
@@ -2228,18 +2251,23 @@ GeodeticReferenceFrameNNPtr WKTParser::Private::buildGeodeticReferenceFrame(
 
         bool setNameAndId = true;
         if (dbContext_ && tableNameForAlias) {
-            std::string outTableName;
-            auto authFactory = AuthorityFactory::create(NN_NO_CHECK(dbContext_),
-                                                        std::string());
-            auto officialName = authFactory->getOfficialNameFromAlias(
-                name, tableNameForAlias, "ESRI", false, outTableName,
-                authNameFromAlias, codeFromAlias);
             if (officialName.empty()) {
-                // For the case of "D_GDA2020" where there is no D_GDA2020 ESRI
-                // alias, so just try without the D_ prefix.
-                const auto nameWithoutDPrefix = name.substr(2);
-                if (identifyFromName(nameWithoutDPrefix)) {
-                    setNameAndId = false; // already done in identifyFromName()
+                std::string outTableName;
+                auto authFactory = AuthorityFactory::create(
+                    NN_NO_CHECK(dbContext_), std::string());
+                officialName = authFactory->getOfficialNameFromAlias(
+                    name, tableNameForAlias, "ESRI", false, outTableName,
+                    authNameFromAlias, codeFromAlias);
+            }
+            if (officialName.empty()) {
+                if (starts_with(name, "D_")) {
+                    // For the case of "D_GDA2020" where there is no D_GDA2020
+                    // ESRI alias, so just try without the D_ prefix.
+                    const auto nameWithoutDPrefix = name.substr(2);
+                    if (identifyFromName(nameWithoutDPrefix)) {
+                        setNameAndId =
+                            false; // already done in identifyFromName()
+                    }
                 }
             } else {
                 if (primeMeridian->nameStr() !=
@@ -2266,7 +2294,7 @@ GeodeticReferenceFrameNNPtr WKTParser::Private::buildGeodeticReferenceFrame(
                 properties.set(IdentifiedObject::IDENTIFIERS_KEY, identifiers);
             }
         }
-    } else if (name.find('_') != std::string::npos) {
+    } else if (!nameSet && name.find('_') != std::string::npos) {
         // Likely coming from WKT1
         identifyFromName(name);
     }
@@ -3441,6 +3469,7 @@ ConversionNNPtr WKTParser::Private::buildProjectionFromESRI(
     int bestMatchCount = -1;
     for (const auto &mapping : esriMappings) {
         int matchCount = 0;
+        int unmatchCount = 0;
         for (const auto *param = mapping->params; param->esri_name; ++param) {
             auto iter = mapParamNameToValue.find(param->esri_name);
             if (iter != mapParamNameToValue.end()) {
@@ -3465,9 +3494,12 @@ ConversionNNPtr WKTParser::Private::buildProjectionFromESRI(
                 }
             } else if (param->is_fixed_value) {
                 mapParamNameToValue[param->esri_name] = param->fixed_value;
+            } else {
+                unmatchCount++;
             }
         }
-        if (matchCount > bestMatchCount) {
+        if (matchCount > bestMatchCount &&
+            !(maybeEsriStyle_ && unmatchCount >= matchCount)) {
             esriMapping = mapping;
             bestMatchCount = matchCount;
         }
@@ -3602,7 +3634,7 @@ ConversionNNPtr WKTParser::Private::buildProjection(
     if (projectionNode->GP()->childrenSize() == 0) {
         ThrowNotEnoughChildren(WKTConstants::PROJECTION);
     }
-    if (esriStyle_) {
+    if (esriStyle_ || maybeEsriStyle_) {
         return buildProjectionFromESRI(baseGeodCRS, projCRSNode, projectionNode,
                                        defaultLinearUnit, defaultAngularUnit);
     }
@@ -6988,6 +7020,16 @@ BaseObjectNNPtr createFromUserInput(const std::string &text, PJ_CONTEXT *ctx) {
  * @throw ParsingException
  */
 BaseObjectNNPtr WKTParser::createFromWKT(const std::string &wkt) {
+
+    const auto dialect = guessDialect(wkt);
+    d->maybeEsriStyle_ = (dialect == WKTGuessedDialect::WKT1_ESRI);
+    if (d->maybeEsriStyle_) {
+        if (wkt.find("PARAMETER[\"X_Scale\",") != std::string::npos) {
+            d->esriStyle_ = true;
+            d->maybeEsriStyle_ = false;
+        }
+    }
+
     const auto build = [this, &wkt]() -> BaseObjectNNPtr {
         size_t indexEnd;
         WKTNodeNNPtr root = WKTNode::createFrom(wkt, 0, 0, indexEnd);
@@ -7047,7 +7089,6 @@ BaseObjectNNPtr WKTParser::createFromWKT(const std::string &wkt) {
 
     auto obj = build();
 
-    const auto dialect = guessDialect(wkt);
     if (dialect == WKTGuessedDialect::WKT1_GDAL ||
         dialect == WKTGuessedDialect::WKT1_ESRI) {
         auto errorMsg = pj_wkt1_parse(wkt);
@@ -7090,7 +7131,10 @@ WKTParser::guessDialect(const std::string &wkt) noexcept {
     for (const auto &pointerKeyword : wkt1_keywords) {
         if (ci_starts_with(wkt, *pointerKeyword)) {
 
-            if (ci_find(wkt, "GEOGCS[\"GCS_") != std::string::npos) {
+            if (ci_find(wkt, "GEOGCS[\"GCS_") != std::string::npos ||
+                (!ci_starts_with(wkt, WKTConstants::LOCAL_CS) &&
+                 ci_find(wkt, "AXIS[") == std::string::npos &&
+                 ci_find(wkt, "AUTHORITY[") == std::string::npos)) {
                 return WKTGuessedDialect::WKT1_ESRI;
             }
 
@@ -7398,7 +7442,8 @@ const std::string &PROJStringFormatter::toString() const {
 
     d->result_.clear();
 
-    for (auto iter = d->steps_.begin(); iter != d->steps_.end();) {
+    auto &steps = d->steps_;
+    for (auto iter = steps.begin(); iter != steps.end();) {
         // Remove no-op helmert
         auto &step = *iter;
         const auto paramCount = step.paramValues.size();
@@ -7412,27 +7457,29 @@ const std::string &PROJStringFormatter::toString() const {
               step.paramValues[5].equals("rz", "0") &&
               step.paramValues[6].equals("s", "0") &&
               step.paramValues[7].keyEquals("convention")))) {
-            iter = d->steps_.erase(iter);
+            iter = steps.erase(iter);
         } else if (d->coordOperationOptimizations_ &&
                    step.name == "unitconvert" && paramCount == 2 &&
                    step.paramValues[0].keyEquals("xy_in") &&
                    step.paramValues[1].keyEquals("xy_out") &&
                    step.paramValues[0].value == step.paramValues[1].value) {
-            iter = d->steps_.erase(iter);
+            iter = steps.erase(iter);
         } else if (step.name == "push" && step.inverted) {
             step.name = "pop";
             step.inverted = false;
+            ++iter;
         } else if (step.name == "pop" && step.inverted) {
             step.name = "push";
             step.inverted = false;
-        } else if (step.name == "noop" && d->steps_.size() > 1) {
-            iter = d->steps_.erase(iter);
+            ++iter;
+        } else if (step.name == "noop" && steps.size() > 1) {
+            iter = steps.erase(iter);
         } else {
             ++iter;
         }
     }
 
-    for (auto &step : d->steps_) {
+    for (auto &step : steps) {
         if (!step.inverted) {
             continue;
         }
@@ -7476,13 +7523,13 @@ const std::string &PROJStringFormatter::toString() const {
     }
 
     {
-        auto iterCur = d->steps_.begin();
-        if (iterCur != d->steps_.end()) {
+        auto iterCur = steps.begin();
+        if (iterCur != steps.end()) {
             ++iterCur;
         }
-        while (iterCur != d->steps_.end()) {
+        while (iterCur != steps.end()) {
 
-            assert(iterCur != d->steps_.begin());
+            assert(iterCur != steps.begin());
             auto iterPrev = std::prev(iterCur);
             auto &prevStep = *iterPrev;
             auto &curStep = *iterCur;
@@ -7490,20 +7537,20 @@ const std::string &PROJStringFormatter::toString() const {
             const auto curStepParamCount = curStep.paramValues.size();
             const auto prevStepParamCount = prevStep.paramValues.size();
 
-            const auto deletePrevAndCurIter = [this, &iterPrev, &iterCur]() {
-                iterCur = d->steps_.erase(iterPrev, std::next(iterCur));
-                if (iterCur != d->steps_.begin())
+            const auto deletePrevAndCurIter = [&steps, &iterPrev, &iterCur]() {
+                iterCur = steps.erase(iterPrev, std::next(iterCur));
+                if (iterCur != steps.begin())
                     iterCur = std::prev(iterCur);
-                if (iterCur == d->steps_.begin())
+                if (iterCur == steps.begin())
                     ++iterCur;
             };
 
             // longlat (or its inverse) with ellipsoid only is a no-op
             // do that only for an internal step
-            if (std::next(iterCur) != d->steps_.end() &&
+            if (std::next(iterCur) != steps.end() &&
                 curStep.name == "longlat" && curStepParamCount == 1 &&
                 curStep.paramValues[0].keyEquals("ellps")) {
-                iterCur = d->steps_.erase(iterCur);
+                iterCur = steps.erase(iterCur);
                 continue;
             }
 
@@ -7578,11 +7625,11 @@ const std::string &PROJStringFormatter::toString() const {
                 continue;
             }
 
-            const auto deletePrevIter = [this, &iterPrev, &iterCur]() {
-                d->steps_.erase(iterPrev, iterCur);
-                if (iterCur != d->steps_.begin())
+            const auto deletePrevIter = [&steps, &iterPrev, &iterCur]() {
+                steps.erase(iterPrev, iterCur);
+                if (iterCur != steps.begin())
                     iterCur = std::prev(iterCur);
-                if (iterCur == d->steps_.begin())
+                if (iterCur == steps.begin())
                     ++iterCur;
             };
 
@@ -7698,7 +7745,7 @@ const std::string &PROJStringFormatter::toString() const {
             // unitconvert (1), axisswap order=2,1, unitconvert(2)  ==>
             // axisswap order=2,1, unitconvert (1), unitconvert(2) which
             // will get further optimized by previous case
-            if (std::next(iterCur) != d->steps_.end() &&
+            if (std::next(iterCur) != steps.end() &&
                 prevStep.name == "unitconvert" && curStep.name == "axisswap" &&
                 curStepParamCount == 1 &&
                 curStep.paramValues[0].equals("order", "2,1")) {
@@ -7722,7 +7769,7 @@ const std::string &PROJStringFormatter::toString() const {
 
             // axisswap order=2,1, unitconvert, axisswap order=2,1 -> can
             // suppress axisswap
-            if (std::next(iterCur) != d->steps_.end() &&
+            if (std::next(iterCur) != steps.end() &&
                 prevStep.name == "axisswap" && curStep.name == "unitconvert" &&
                 prevStepParamCount == 1 &&
                 prevStep.paramValues[0].equals("order", "2,1")) {
@@ -7731,11 +7778,15 @@ const std::string &PROJStringFormatter::toString() const {
                 if (nextStep.name == "axisswap" &&
                     nextStep.paramValues.size() == 1 &&
                     nextStep.paramValues[0].equals("order", "2,1")) {
-                    d->steps_.erase(iterPrev);
-                    d->steps_.erase(iterNext);
-                    if (iterCur != d->steps_.begin())
+                    steps.erase(iterPrev);
+                    steps.erase(iterNext);
+                    // Coverity complains about invalid usage of iterCur
+                    // due to the above erase(iterNext). To the best of our
+                    // understanding, this is a false-positive.
+                    // coverity[use_iterator]
+                    if (iterCur != steps.begin())
                         iterCur = std::prev(iterCur);
-                    if (iterCur == d->steps_.begin())
+                    if (iterCur == steps.begin())
                         ++iterCur;
                     continue;
                 }
@@ -7797,7 +7848,7 @@ const std::string &PROJStringFormatter::toString() const {
                             Step::KeyValue("z", internal::toString(zSum));
 
                         // Delete this iter
-                        iterCur = d->steps_.erase(iterCur);
+                        iterCur = steps.erase(iterCur);
                     }
                     continue;
                 }
@@ -7855,7 +7906,7 @@ const std::string &PROJStringFormatter::toString() const {
             // +step +proj=vgridshift [...]
             // +step +inv +proj=hgridshift +grids=grid_A +omit_fwd
             // +step +proj=pop +v_1 +v_2
-            if (std::next(iterCur) != d->steps_.end() &&
+            if (std::next(iterCur) != steps.end() &&
                 prevStep.name == "hgridshift" && prevStepParamCount == 1 &&
                 curStep.name == "vgridshift") {
                 auto iterNext = std::next(iterCur);
@@ -7868,7 +7919,7 @@ const std::string &PROJStringFormatter::toString() const {
                     pushStep.name = "push";
                     pushStep.paramValues.emplace_back("v_1");
                     pushStep.paramValues.emplace_back("v_2");
-                    d->steps_.insert(iterPrev, pushStep);
+                    steps.insert(iterPrev, pushStep);
 
                     prevStep.paramValues.emplace_back("omit_inv");
 
@@ -7878,7 +7929,7 @@ const std::string &PROJStringFormatter::toString() const {
                     popStep.name = "pop";
                     popStep.paramValues.emplace_back("v_1");
                     popStep.paramValues.emplace_back("v_2");
-                    d->steps_.insert(std::next(iterNext), popStep);
+                    steps.insert(std::next(iterNext), popStep);
 
                     continue;
                 }
@@ -7905,10 +7956,10 @@ const std::string &PROJStringFormatter::toString() const {
         }
     }
 
-    if (d->steps_.size() > 1 ||
-        (d->steps_.size() == 1 &&
-         (d->steps_.front().inverted || d->steps_.front().hasKey("omit_inv") ||
-          d->steps_.front().hasKey("omit_fwd") ||
+    if (steps.size() > 1 ||
+        (steps.size() == 1 &&
+         (steps.front().inverted || steps.front().hasKey("omit_inv") ||
+          steps.front().hasKey("omit_fwd") ||
           !d->globalParamValues_.empty()))) {
         d->appendToResult("+proj=pipeline");
 
@@ -7927,7 +7978,7 @@ const std::string &PROJStringFormatter::toString() const {
         }
     }
 
-    for (const auto &step : d->steps_) {
+    for (const auto &step : steps) {
         std::string curLine;
         if (!d->result_.empty()) {
             if (d->multiLine_) {
@@ -7957,7 +8008,7 @@ const std::string &PROJStringFormatter::toString() const {
             if (d->maxLineLength_ > 0 && d->multiLine_ &&
                 curLine.size() + newKV.size() >
                     static_cast<size_t>(d->maxLineLength_)) {
-                if (d->multiLine_ && !d->result_.empty())
+                if (!d->result_.empty())
                     d->result_ += '\n';
                 d->result_ += curLine;
                 curLine = std::string(
