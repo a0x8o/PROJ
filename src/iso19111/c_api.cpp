@@ -222,6 +222,13 @@ static PJ *pj_obj_create(PJ_CONTEXT *ctx, const IdentifiedObjectNNPtr &objIn) {
                     const auto &ellps = geodCRS->ellipsoid();
                     const double a = ellps->semiMajorAxis().getSIValue();
                     const double es = ellps->squaredEccentricity();
+                    if (!(a > 0 && es >= 0 && es < 1)) {
+                        proj_log_error(pj, _("Invalid ellipsoid parameters"));
+                        proj_errno_set(pj,
+                                       PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
+                        proj_destroy(pj);
+                        return nullptr;
+                    }
                     pj_calc_ellipsoid_params(pj, a, es);
                     assert(pj->geod == nullptr);
                     pj->geod = static_cast<struct geod_geodesic *>(
@@ -7078,6 +7085,37 @@ PJ *proj_create_conversion_pole_rotation_grib_convention(
             PropertyMap(), Angle(south_pole_lat_in_unrotated_crs, angUnit),
             Angle(south_pole_long_in_unrotated_crs, angUnit),
             Angle(axis_rotation, angUnit));
+        return proj_create_conversion(ctx, conv);
+    } catch (const std::exception &e) {
+        proj_log_error(ctx, __FUNCTION__, e.what());
+    }
+    return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Instantiate a conversion based on the Pole Rotation method, using
+ * the conventions of the netCDF CF convention for the netCDF format.
+ *
+ * See
+ * osgeo::proj::operation::Conversion::createPoleRotationNetCDFCFConvention().
+ *
+ * Linear parameters are expressed in (linear_unit_name,
+ * linear_unit_conv_factor).
+ * Angular parameters are expressed in (ang_unit_name, ang_unit_conv_factor).
+ */
+PJ *proj_create_conversion_pole_rotation_netcdf_cf_convention(
+    PJ_CONTEXT *ctx, double grid_north_pole_latitude,
+    double grid_north_pole_longitude, double north_pole_grid_longitude,
+    const char *ang_unit_name, double ang_unit_conv_factor) {
+    SANITIZE_CTX(ctx);
+    try {
+        UnitOfMeasure angUnit(
+            createAngularUnit(ang_unit_name, ang_unit_conv_factor));
+        auto conv = Conversion::createPoleRotationNetCDFCFConvention(
+            PropertyMap(), Angle(grid_north_pole_latitude, angUnit),
+            Angle(grid_north_pole_longitude, angUnit),
+            Angle(north_pole_grid_longitude, angUnit));
         return proj_create_conversion(ctx, conv);
     } catch (const std::exception &e) {
         proj_log_error(ctx, __FUNCTION__, e.what());
