@@ -747,6 +747,53 @@ TEST(crs, EPSG_4268_geogcrs_deprecated_as_WKT1_GDAL) {
 
 // ---------------------------------------------------------------------------
 
+TEST(crs, IAU_1000_as_WKT2) {
+    auto dbContext = DatabaseContext::create();
+    auto factory = AuthorityFactory::create(dbContext, "IAU_2015");
+    auto crs = factory->createCoordinateReferenceSystem("1000");
+    WKTFormatterNNPtr f(
+        WKTFormatter::create(WKTFormatter::Convention::WKT2_2019, dbContext));
+    auto wkt = crs->exportToWKT(f.get());
+    // Check that IAU_2015 is split into a authority name and version
+    EXPECT_TRUE(wkt.find("ID[\"IAU\",1000,2015]") != std::string::npos) << wkt;
+
+    auto obj = createFromUserInput(wkt, dbContext);
+    auto crs2 = nn_dynamic_pointer_cast<CRS>(obj);
+    ASSERT_TRUE(crs2 != nullptr);
+    auto wkt2 = crs2->exportToWKT(f.get());
+    // Check that IAU_2015 is split into a authority name and version
+    EXPECT_TRUE(wkt2.find("ID[\"IAU\",1000,2015]") != std::string::npos)
+        << wkt2;
+}
+
+// ---------------------------------------------------------------------------
+
+TEST(crs, IAU_1000_as_PROJJSON) {
+    auto dbContext = DatabaseContext::create();
+    auto factory = AuthorityFactory::create(dbContext, "IAU_2015");
+    auto crs = factory->createCoordinateReferenceSystem("1000");
+    auto projjson = crs->exportToJSON(JSONFormatter::create(dbContext).get());
+    // Check that IAU_2015 is split into a authority name and version
+    EXPECT_TRUE(projjson.find("\"authority\": \"IAU\",") != std::string::npos)
+        << projjson;
+    EXPECT_TRUE(projjson.find("\"code\": 1000,") != std::string::npos)
+        << projjson;
+    EXPECT_TRUE(projjson.find("\"version\": 2015") != std::string::npos)
+        << projjson;
+
+    auto obj = createFromUserInput(projjson, dbContext);
+    auto crs2 = nn_dynamic_pointer_cast<CRS>(obj);
+    ASSERT_TRUE(crs2 != nullptr);
+    WKTFormatterNNPtr f(
+        WKTFormatter::create(WKTFormatter::Convention::WKT2_2019, dbContext));
+    auto wkt2 = crs2->exportToWKT(f.get());
+    // Check that IAU_2015 is split into a authority name and version
+    EXPECT_TRUE(wkt2.find("ID[\"IAU\",1000,2015]") != std::string::npos)
+        << wkt2;
+}
+
+// ---------------------------------------------------------------------------
+
 TEST(crs, EPSG_2008_projcrs_deprecated_as_WKT1_GDAL) {
     auto dbContext = DatabaseContext::create();
     auto factory = AuthorityFactory::create(dbContext, "EPSG");
@@ -6659,4 +6706,57 @@ TEST(crs, projected_alterParametersLinearUnit_do_not_mess_deriving_conversion) {
         projCRS->alterParametersLinearUnit(UnitOfMeasure::METRE, false);
     }
     EXPECT_EQ(projCRS->derivingConversion()->targetCRS().get(), projCRS.get());
+}
+
+// ---------------------------------------------------------------------------
+
+TEST(crs, projected_is_equivalent_to_with_proj4_extension) {
+    const auto obj1 = PROJStringParser().createFromPROJString(
+        "+proj=omerc +lat_0=50 +alpha=50.0 +no_rot +a=6378144.0 +b=6356759.0 "
+        "+lon_0=8.0 +type=crs");
+    const auto crs1 = nn_dynamic_pointer_cast<ProjectedCRS>(obj1);
+    ASSERT_TRUE(crs1 != nullptr);
+
+    const auto wkt = crs1->exportToWKT(
+        WKTFormatter::create(WKTFormatter::Convention::WKT2_2019).get());
+    const auto obj_from_wkt = WKTParser().createFromWKT(wkt);
+    const auto crs_from_wkt =
+        nn_dynamic_pointer_cast<ProjectedCRS>(obj_from_wkt);
+
+    // Check equivalence of the CRS from PROJ.4 and WKT
+    EXPECT_TRUE(crs1->isEquivalentTo(crs_from_wkt.get(),
+                                     IComparable::Criterion::EQUIVALENT));
+
+    ASSERT_TRUE(crs_from_wkt != nullptr);
+    // Same as above but with different option order
+    const auto obj2 = PROJStringParser().createFromPROJString(
+        "+proj=omerc +lat_0=50 +no_rot +alpha=50.0 +a=6378144.0 +b=6356759.0 "
+        "+lon_0=8.0 +type=crs");
+    const auto crs2 = nn_dynamic_pointer_cast<ProjectedCRS>(obj2);
+    ASSERT_TRUE(crs2 != nullptr);
+
+    // Check equivalence of the 2 PROJ.4 based CRS
+    EXPECT_TRUE(
+        crs1->isEquivalentTo(crs2.get(), IComparable::Criterion::EQUIVALENT));
+
+    // Without +no_rot --> no PROJ.4 extension
+    const auto objNoRot = PROJStringParser().createFromPROJString(
+        "+proj=omerc +lat_0=50 +alpha=50.0 +a=6378144.0 +b=6356759.0 "
+        "+lon_0=8.0 +type=crs");
+    const auto crsNoRot = nn_dynamic_pointer_cast<ProjectedCRS>(objNoRot);
+    ASSERT_TRUE(crsNoRot != nullptr);
+    EXPECT_FALSE(crs1->isEquivalentTo(crsNoRot.get(),
+                                      IComparable::Criterion::EQUIVALENT));
+    EXPECT_FALSE(crsNoRot->isEquivalentTo(crs1.get(),
+                                          IComparable::Criterion::EQUIVALENT));
+
+    // Change alpha value
+    const auto objDifferent = PROJStringParser().createFromPROJString(
+        "+proj=omerc +lat_0=50 +alpha=49.0 +no_rot +a=6378144.0 +b=6356759.0 "
+        "+lon_0=8.0 +type=crs");
+    const auto crsDifferent =
+        nn_dynamic_pointer_cast<ProjectedCRS>(objDifferent);
+    ASSERT_TRUE(crsDifferent != nullptr);
+    EXPECT_FALSE(crs1->isEquivalentTo(crsDifferent.get(),
+                                      IComparable::Criterion::EQUIVALENT));
 }
