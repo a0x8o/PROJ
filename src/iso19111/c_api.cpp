@@ -373,6 +373,24 @@ const char *proj_context_get_database_path(PJ_CONTEXT *ctx) {
  * The returned pointer remains valid while ctx is valid, and until
  * proj_context_get_database_metadata() is called.
  *
+ * Available keys:
+ *
+ * - DATABASE.LAYOUT.VERSION.MAJOR
+ * - DATABASE.LAYOUT.VERSION.MINOR
+ * - EPSG.VERSION
+ * - EPSG.DATE
+ * - ESRI.VERSION
+ * - ESRI.DATE
+ * - IGNF.SOURCE
+ * - IGNF.VERSION
+ * - IGNF.DATE
+ * - NKG.SOURCE
+ * - NKG.VERSION
+ * - NKG.DATE
+ * - PROJ.VERSION
+ * - PROJ_DATA.VERSION : PROJ-data version most compatible with this database.
+ *
+ *
  * @param ctx PROJ context, or NULL for default context
  * @param key Metadata key. Must not be NULL
  * @return value, or nullptr
@@ -1571,6 +1589,11 @@ const char *proj_as_wkt(PJ_CONTEXT *ctx, const PJ *obj, PJ_WKT_TYPE type,
  * The returned string is valid while the input obj parameter is valid,
  * and until a next call to proj_as_proj_string() with the same input
  * object.
+ *
+ * \warning If a CRS object was not created from a PROJ string,
+ *          exporting to a PROJ string will in most cases
+ *          cause a loss of information. This can potentially lead to
+ *          erroneous transformations.
  *
  * This function calls
  * osgeo::proj::io::IPROJStringExportable::exportToPROJString().
@@ -3707,8 +3730,8 @@ PJ *proj_alter_name(PJ_CONTEXT *ctx, const PJ *obj, const char *name) {
  * @return Object that must be unreferenced with
  * proj_destroy(), or NULL in case of error.
  */
-PJ *proj_alter_id(PJ_CONTEXT *ctx, const PJ *obj,
-                           const char *auth_name, const char *code) {
+PJ *proj_alter_id(PJ_CONTEXT *ctx, const PJ *obj, const char *auth_name,
+                  const char *code) {
     SANITIZE_CTX(ctx);
     if (!obj || !auth_name || !code) {
         proj_context_errno_set(ctx, PROJ_ERR_OTHER_API_MISUSE);
@@ -4143,8 +4166,7 @@ PJ *proj_crs_demote_to_2D(PJ_CONTEXT *ctx, const char *crs_2D_name,
  * @return Object that must be unreferenced with
  * proj_destroy(), or NULL in case of error.
  */
-PJ *proj_create_engineering_crs(PJ_CONTEXT *ctx,
-                                         const char *crs_name) {
+PJ *proj_create_engineering_crs(PJ_CONTEXT *ctx, const char *crs_name) {
     SANITIZE_CTX(ctx);
     try {
         return pj_obj_create(
