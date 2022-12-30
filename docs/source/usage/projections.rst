@@ -38,6 +38,8 @@ documenting the individual :doc:`projections<../operations/projections/index>`.
 
 In the sections below most of the parameters are explained in details.
 
+.. _projection_units:
+
 Units
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -64,6 +66,32 @@ Scaling of output units can be done by applying the ``+k_0`` argument. The
 returned coordinates are scaled by the value assigned with the ``+k_0``
 parameter.
 
+Input units for parameters that can be understood to be either decimal degrees or
+radians are interpreted to be decimal degrees by convention.
+
+Explict specification of input units can be accomplished by adding the appropriate
+suffix to input values.
+
+
+    +----------------+---------------------+
+    | Suffix         | Unit                |
+    +================+=====================+
+    | d              | Decimal degrees     |
+    +----------------+                     +
+    | D              |                     |
+    +----------------+                     +
+    | °              |                     |
+    +----------------+---------------------+
+    | r              | Radians             |
+    +----------------+                     +
+    | R              |                     |
+    +----------------+---------------------+
+
+Example of use.  The longitude of the central meridian ``+lon_0=90``, can also be expressed more explictly
+with units of decimal degrees as ``+lon_0=90d`` or in radian
+units as ``+lon_0=1.570796r`` (approximately).
+
+
 False Easting/Northing
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -72,15 +100,21 @@ Virtually all coordinate systems allow for the presence of a false easting
 meters even if the coordinate system is some other units.  Some coordinate
 systems (such as UTM) have implicit false easting and northing values.
 
+.. _longitude_wrapping:
+
 Longitude Wrapping
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 By default PROJ wraps output longitudes in the range -180 to 180.  The ``+over``
 switch can be used to disable the default wrapping which is done at a low level
 in ``pj_inv()``.  This is particularly useful with projections like the
-:doc:`equidistant cylindrical<../operations/projections/eqc>`
-where it would be desirable for X values past -20000000 (roughly) to continue
+:ref:`eqc` or :ref:`merc`
+where it could be desirable for X values past -20000000 (roughly) to continue
 past -180 instead of wrapping to +180.
+
+Note however that for most projections where the 180 meridian does not project
+to a straight line, ``+over`` will have no effect or will not lead to expected
+results.
 
 The ``+lon_wrap`` option can be used to provide an alternative means of doing
 longitude wrapping within ``pj_transform()``.  The argument to this option is a
@@ -159,5 +193,3 @@ They can be combined in +axis in forms like:
 
     The ``+axis`` argument does not work with the :program:`proj` command line
     utility.
-
-

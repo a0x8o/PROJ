@@ -21,7 +21,7 @@
 ** TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 ** SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -185,6 +185,12 @@ PJ *PROJECTION(omerc) {
             return pj_default_destructor(P, PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
         }
     }
+
+    if( pj_param(P->ctx, P->params, "rlon_0").i )
+    {
+        proj_log_trace(P, _("lon_0 is ignored."));
+    }
+
     com = sqrt(P->one_es);
     if (fabs(P->phi0) > EPS) {
         sinph0 = sin(P->phi0);

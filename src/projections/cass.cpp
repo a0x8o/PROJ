@@ -1,4 +1,4 @@
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -43,7 +43,7 @@ static PJ_XY cass_e_forward (PJ_LP lp, PJ *P) {          /* Ellipsoidal, forward
     const double A2 = A * A;
 
     xy.x = nu * A * (1. - A2 * T *
-        (C1 - (8. - T + 8. * C) * A2 * C2));
+        (C1 + (8. - T + 8. * C) * A2 * C2));
     xy.y = M - Q->m0 + nu * tanphi * A2 *
         (.5 + (5. - T + 6. * C) * A2 * C3);
     if( Q->hyperbolic )
@@ -68,7 +68,7 @@ static PJ_LP cass_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, inverse
     PJ_LP lp = {0.0, 0.0};
     struct cass_data *Q = static_cast<struct cass_data*>(P->opaque);
 
-    const double phi1 = pj_inv_mlfn (P->ctx, Q->m0 + xy.y, P->es, Q->en);
+    const double phi1 = pj_inv_mlfn (Q->m0 + xy.y, Q->en);
     const double tanphi1 = tan (phi1);
     const double T1 = tanphi1*tanphi1;
     const double sinphi1 = sin (phi1);
@@ -82,13 +82,13 @@ static PJ_LP cass_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, inverse
     lp.lam = D * (1. + T1 * D2 *
         (-C4 + (1. + 3. * T1) * D2 * C5)) / cos (phi1);
 
-    if( Q->hyperbolic )
-    {
-        // EPSG guidance note 7-2 suggests a custom approximation for the
-        // 'Vanua Levu 1915 / Vanua Levu Grid' case, but better use the
-        // generic inversion method
-        lp = pj_generic_inverse_2d(xy, P, lp);
-    }
+    // EPSG guidance note 7-2 suggests a custom approximation for the
+    // 'Vanua Levu 1915 / Vanua Levu Grid' case, but better use the
+    // generic inversion method
+    // Actually use it in the non-hyperbolic case. It enables to make the
+    // 5108.gie roundtripping tests to success, with at most 2 iterations.
+    constexpr double deltaXYTolerance = 1e-12;
+    lp = pj_generic_inverse_2d(xy, P, lp, deltaXYTolerance);
 
     return lp;
 }
@@ -131,7 +131,7 @@ PJ *PROJECTION(cass) {
         return pj_default_destructor (P, PROJ_ERR_OTHER /*ENOMEM*/);
     P->destructor = destructor;
 
-    Q->en = pj_enfn (P->es);
+    Q->en = pj_enfn(P->n);
     if (nullptr==Q->en)
         return pj_default_destructor (P, PROJ_ERR_OTHER /*ENOMEM*/);
 

@@ -1,4 +1,4 @@
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -51,7 +51,7 @@ static PJ_LP eqdc_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, inverse
         }
         lp.phi = Q->c - Q->rho;
         if (Q->ellips)
-            lp.phi = pj_inv_mlfn(P->ctx, lp.phi, P->es, Q->en);
+            lp.phi = pj_inv_mlfn(lp.phi, Q->en);
         lp.lam = atan2(xy.x, xy.y) / Q->n;
     } else {
         lp.lam = 0.;
@@ -103,7 +103,7 @@ PJ *PROJECTION(eqdc) {
         return destructor(P, PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
     }
 
-    if (!(Q->en = pj_enfn(P->es)))
+    if (!(Q->en = pj_enfn(P->n)))
         return destructor(P, PROJ_ERR_OTHER /*ENOMEM*/);
 
     sinphi = sin(Q->phi1);
@@ -119,8 +119,12 @@ PJ *PROJECTION(eqdc) {
         if (secant) { /* secant cone */
             sinphi = sin(Q->phi2);
             cosphi = cos(Q->phi2);
-            Q->n = (m1 - pj_msfn(sinphi, cosphi, P->es)) /
-                (pj_mlfn(Q->phi2, sinphi, cosphi, Q->en) - ml1);
+            const double ml2 = pj_mlfn(Q->phi2, sinphi, cosphi, Q->en);
+            if (ml1 == ml2) {
+                proj_log_error(P, _("Eccentricity too close to 1"));
+                return destructor(P, PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
+            }
+            Q->n = (m1 - pj_msfn(sinphi, cosphi, P->es)) / (ml2 - ml1);
             if (Q->n == 0) {
                 // Not quite, but es is very close to 1...
                 proj_log_error(P, _("Invalid value for eccentricity"));

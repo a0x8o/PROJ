@@ -10,7 +10,7 @@
 * implementation.
 */
 
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -18,7 +18,6 @@
 #include "proj.h"
 #include "proj_internal.h"
 #include <math.h>
-#include "mlfn.hpp"
 
 PROJ_HEAD(tmerc, "Transverse Mercator") "\n\tCyl, Sph&Ell\n\tapprox";
 PROJ_HEAD(etmerc, "Extended Transverse Mercator") "\n\tCyl, Sph";
@@ -106,7 +105,7 @@ static PJ_XY approx_e_fwd (PJ_LP lp, PJ *P)
         FC5 * als * (5. + t * (t - 18.) + n * (14. - 58. * t)
         + FC7 * als * (61. + t * ( t * (179. - t) - 479. ) )
         )));
-    xy.y = P->k0 * (inline_pj_mlfn(lp.phi, sinphi, cosphi, Q->en) - Q->ml0 +
+    xy.y = P->k0 * (pj_mlfn(lp.phi, sinphi, cosphi, Q->en) - Q->ml0 +
         sinphi * al * lp.lam * FC2 * ( 1. +
         FC4 * als * (5. - t + n * (9. + 4. * n) +
         FC6 * als * (61. + t * (t - 58.) + n * (270. - 330 * t)
@@ -155,12 +154,12 @@ static PJ_LP approx_e_inv (PJ_XY xy, PJ *P) {
     PJ_LP lp = {0.0,0.0};
     const auto *Q = &(static_cast<struct tmerc_data*>(P->opaque)->approx);
 
-    double sinphi, cosphi;
-    lp.phi = inline_pj_inv_mlfn(P->ctx, Q->ml0 + xy.y / P->k0, P->es, Q->en, &sinphi, &cosphi);
+    lp.phi = pj_inv_mlfn(Q->ml0 + xy.y / P->k0, Q->en);
     if (fabs(lp.phi) >= M_HALFPI) {
         lp.phi = xy.y < 0. ? -M_HALFPI : M_HALFPI;
         lp.lam = 0.;
     } else {
+        double sinphi = sin(lp.phi), cosphi = cos(lp.phi);
         double t = fabs (cosphi) > 1e-10 ? sinphi/cosphi : 0.;
         const double n = Q->esp * cosphi * cosphi;
         double con = 1. - P->es * sinphi * sinphi;
@@ -223,7 +222,7 @@ static PJ *setup_approx(PJ *P) {
     auto *Q = &(static_cast<struct tmerc_data*>(P->opaque)->approx);
 
     if (P->es != 0.0) {
-        if (!(Q->en = pj_enfn(P->es)))
+        if (!(Q->en = pj_enfn(P->n)))
             return pj_default_destructor(P, PROJ_ERR_OTHER /*ENOMEM*/);
 
         Q->ml0 = pj_mlfn(P->phi0, sin(P->phi0), cos(P->phi0), Q->en);

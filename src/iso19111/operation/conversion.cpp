@@ -3320,6 +3320,9 @@ static bool createPROJ4WebMercator(const Conversion *conv,
     formatter->addParam("k", 1.0);
     formatter->addParam("units", units);
     formatter->addParam("nadgrids", "@null");
+    if (targetProjCRS && targetProjCRS->hasOver()) {
+        formatter->addParam("over");
+    }
     formatter->addParam("wktext");
     formatter->addParam("no_defs");
     return true;
@@ -3462,12 +3465,16 @@ void Conversion::_exportToPROJString(
         methodEPSGCode == EPSG_CODE_METHOD_AFFINE_PARAMETRIC_TRANSFORMATION;
     const bool isGeographicGeocentric =
         methodEPSGCode == EPSG_CODE_METHOD_GEOGRAPHIC_GEOCENTRIC;
+    const bool isGeographicOffsets =
+        methodEPSGCode == EPSG_CODE_METHOD_GEOGRAPHIC2D_OFFSETS ||
+        methodEPSGCode == EPSG_CODE_METHOD_GEOGRAPHIC3D_OFFSETS ||
+        methodEPSGCode == EPSG_CODE_METHOD_GEOGRAPHIC2D_WITH_HEIGHT_OFFSETS;
     const bool isHeightDepthReversal =
         methodEPSGCode == EPSG_CODE_METHOD_HEIGHT_DEPTH_REVERSAL;
     const bool applySourceCRSModifiers =
         !isZUnitConversion && !isAffineParametric &&
         !isAxisOrderReversal(methodEPSGCode) && !isGeographicGeocentric &&
-        !isHeightDepthReversal;
+        !isGeographicOffsets && !isHeightDepthReversal;
     bool applyTargetCRSModifiers = applySourceCRSModifiers;
 
     if (formatter->getCRSExport()) {
@@ -3565,6 +3572,11 @@ void Conversion::_exportToPROJString(
             const auto &components = compound->componentReferenceSystems();
             if (!components.empty()) {
                 horiz = components.front().as_nullable();
+                const auto boundCRS =
+                    dynamic_cast<const crs::BoundCRS *>(horiz.get());
+                if (boundCRS) {
+                    horiz = boundCRS->baseCRS().as_nullable();
+                }
             }
         }
 
@@ -3839,6 +3851,28 @@ void Conversion::_exportToPROJString(
         formatter->addParam("x_0", falseEasting);
         formatter->addParam("y_0", falseNorthing);
         bConversionDone = true;
+    } else if (ci_equal(methodName,
+                        PROJ_WKT2_NAME_METHOD_PEIRCE_QUINCUNCIAL_SQUARE) ||
+               ci_equal(methodName,
+                        PROJ_WKT2_NAME_METHOD_PEIRCE_QUINCUNCIAL_DIAMOND)) {
+        const auto &scaleFactor = parameterValueMeasure(
+            EPSG_CODE_PARAMETER_SCALE_FACTOR_AT_NATURAL_ORIGIN);
+        if (scaleFactor.unit().type() != common::UnitOfMeasure::Type::UNKNOWN &&
+            std::fabs(scaleFactor.getSIValue() - 1.0) > 1e-10) {
+            throw io::FormattingException(
+                "Only scale factor = 1 handled for Peirce Quincuncial");
+        }
+        const auto &latitudeOfOriginDeg = parameterValueMeasure(
+            EPSG_CODE_PARAMETER_LATITUDE_OF_NATURAL_ORIGIN);
+        if (latitudeOfOriginDeg.unit().type() !=
+                common::UnitOfMeasure::Type::UNKNOWN &&
+            std::fabs(parameterValueNumeric(
+                          EPSG_CODE_PARAMETER_LATITUDE_OF_NATURAL_ORIGIN,
+                          common::UnitOfMeasure::DEGREE) -
+                      90.0) > 1e-10) {
+            throw io::FormattingException("Only latitude of natural origin = "
+                                          "90 handled for Peirce Quincuncial");
+        }
     } else if (formatter->convention() ==
                    io::PROJStringFormatter::Convention::PROJ_5 &&
                isZUnitConversion) {
@@ -3961,6 +3995,11 @@ void Conversion::_exportToPROJString(
                             compound->componentReferenceSystems();
                         if (!components.empty()) {
                             horiz = components.front().get();
+                            const auto boundCRS =
+                                dynamic_cast<const crs::BoundCRS *>(horiz);
+                            if (boundCRS) {
+                                horiz = boundCRS->baseCRS().get();
+                            }
                         }
                     }
 
@@ -4005,6 +4044,16 @@ void Conversion::_exportToPROJString(
                         EPSG_CODE_PARAMETER_SCALE_FACTOR_AT_NATURAL_ORIGIN) {
                         valueConverted = 1.0;
                     }
+                    if ((mapping->epsg_code ==
+                             EPSG_CODE_METHOD_HOTINE_OBLIQUE_MERCATOR_VARIANT_A ||
+                         mapping->epsg_code ==
+                             EPSG_CODE_METHOD_HOTINE_OBLIQUE_MERCATOR_VARIANT_B) &&
+                        param->epsg_code ==
+                            EPSG_CODE_PARAMETER_ANGLE_RECTIFIED_TO_SKEW_GRID) {
+                        // Do not use 0 as the default value for +gamma of
+                        // proj=omerc
+                        continue;
+                    }
                 } else if (param->unit_type ==
                            common::UnitOfMeasure::Type::ANGULAR) {
                     valueConverted =
@@ -4041,7 +4090,12 @@ void Conversion::_exportToPROJString(
             }
         }
 
-        if (!bEllipsoidParametersDone) {
+        auto derivedProjCRS =
+            dynamic_cast<const crs::DerivedProjectedCRS *>(horiz);
+
+        // horiz != nullptr: only to make clang static analyzer happy
+        if (!bEllipsoidParametersDone && horiz != nullptr &&
+            derivedProjCRS == nullptr) {
             auto targetGeodCRS = horiz->extractGeodeticCRS();
             auto targetGeogCRS =
                 std::dynamic_pointer_cast<crs::GeographicCRS>(targetGeodCRS);
@@ -4059,10 +4113,26 @@ void Conversion::_exportToPROJString(
         }
 
         auto projCRS = dynamic_cast<const crs::ProjectedCRS *>(horiz);
+        if (projCRS == nullptr) {
+            auto boundCRS = dynamic_cast<const crs::BoundCRS *>(horiz);
+            if (boundCRS) {
+                projCRS = dynamic_cast<const crs::ProjectedCRS *>(
+                    boundCRS->baseCRS().get());
+            }
+        }
         if (projCRS) {
             formatter->pushOmitZUnitConversion();
             projCRS->addUnitConvertAndAxisSwap(formatter, bAxisSpecFound);
             formatter->popOmitZUnitConversion();
+            if (projCRS->hasOver()) {
+                formatter->addParam("over");
+            }
+        } else {
+            if (derivedProjCRS) {
+                formatter->pushOmitZUnitConversion();
+                derivedProjCRS->addUnitConvertAndAxisSwap(formatter);
+                formatter->popOmitZUnitConversion();
+            }
         }
 
         auto derivedGeographicCRS =
@@ -4186,6 +4256,111 @@ ConversionNNPtr Conversion::identify() const {
     }
 
     return newConversion;
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Instantiate a conversion with method Geographic 2D offsets
+ *
+ * This method is defined as [EPSG:9619]
+ * (https://www.epsg-registry.org/export.htm?gml=urn:ogc:def:method:EPSG::9619)
+ * *
+ * @param properties See \ref general_properties of the conversion.
+ * At minimum the name should be defined.
+ * @param offsetLat Latitude offset to add.
+ * @param offsetLon Longitude offset to add.
+ * @return new conversion.
+ */
+ConversionNNPtr
+Conversion::createGeographic2DOffsets(const util::PropertyMap &properties,
+                                      const common::Angle &offsetLat,
+                                      const common::Angle &offsetLon) {
+    return create(
+        properties,
+        createMethodMapNameEPSGCode(EPSG_CODE_METHOD_GEOGRAPHIC2D_OFFSETS),
+        VectorOfParameters{
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_LATITUDE_OFFSET),
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_LONGITUDE_OFFSET)},
+        VectorOfValues{offsetLat, offsetLon});
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Instantiate a conversion with method Geographic 3D offsets
+ *
+ * This method is defined as [EPSG:9660]
+ * (https://www.epsg-registry.org/export.htm?gml=urn:ogc:def:method:EPSG::9660)
+ * *
+ * @param properties See \ref general_properties of the Conversion.
+ * At minimum the name should be defined.
+ * @param offsetLat Latitude offset to add.
+ * @param offsetLon Longitude offset to add.
+ * @param offsetHeight Height offset to add.
+ * @return new Conversion.
+ */
+ConversionNNPtr Conversion::createGeographic3DOffsets(
+    const util::PropertyMap &properties, const common::Angle &offsetLat,
+    const common::Angle &offsetLon, const common::Length &offsetHeight) {
+    return create(
+        properties,
+        createMethodMapNameEPSGCode(EPSG_CODE_METHOD_GEOGRAPHIC3D_OFFSETS),
+        VectorOfParameters{
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_LATITUDE_OFFSET),
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_LONGITUDE_OFFSET),
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_VERTICAL_OFFSET)},
+        VectorOfValues{offsetLat, offsetLon, offsetHeight});
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Instantiate a conversion with method Geographic 2D with
+ * height
+ * offsets
+ *
+ * This method is defined as [EPSG:9618]
+ * (https://www.epsg-registry.org/export.htm?gml=urn:ogc:def:method:EPSG::9618)
+ * *
+ * @param properties See \ref general_properties of the Conversion.
+ * At minimum the name should be defined.
+ * @param offsetLat Latitude offset to add.
+ * @param offsetLon Longitude offset to add.
+ * @param offsetHeight Geoid undulation to add.
+ * @return new Conversion.
+ */
+ConversionNNPtr Conversion::createGeographic2DWithHeightOffsets(
+    const util::PropertyMap &properties, const common::Angle &offsetLat,
+    const common::Angle &offsetLon, const common::Length &offsetHeight) {
+    return create(
+        properties,
+        createMethodMapNameEPSGCode(
+            EPSG_CODE_METHOD_GEOGRAPHIC2D_WITH_HEIGHT_OFFSETS),
+        VectorOfParameters{
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_LATITUDE_OFFSET),
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_LONGITUDE_OFFSET),
+            createOpParamNameEPSGCode(EPSG_CODE_PARAMETER_GEOID_UNDULATION)},
+        VectorOfValues{offsetLat, offsetLon, offsetHeight});
+}
+
+// ---------------------------------------------------------------------------
+
+/** \brief Instantiate a conversion with method Vertical Offset.
+ *
+ * This method is defined as [EPSG:9616]
+ * (https://www.epsg-registry.org/export.htm?gml=urn:ogc:def:method:EPSG::9616)
+ * *
+ * @param properties See \ref general_properties of the Conversion.
+ * At minimum the name should be defined.
+ * @param offsetHeight Geoid undulation to add.
+ * @return new Conversion.
+ */
+ConversionNNPtr
+Conversion::createVerticalOffset(const util::PropertyMap &properties,
+                                 const common::Length &offsetHeight) {
+    return create(properties,
+                  createMethodMapNameEPSGCode(EPSG_CODE_METHOD_VERTICAL_OFFSET),
+                  VectorOfParameters{createOpParamNameEPSGCode(
+                      EPSG_CODE_PARAMETER_VERTICAL_OFFSET)},
+                  VectorOfValues{offsetHeight});
 }
 
 // ---------------------------------------------------------------------------

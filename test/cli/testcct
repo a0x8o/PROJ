@@ -57,6 +57,10 @@ echo "" >> ${OUT}
 echo "Test cct with object code initialization" >> ${OUT}
 echo "3541657.3778 948984.2343 5201383.5231 2020.5" | $EXE EPSG:8366 >>${OUT}
 
+echo "Test cct with object that is not a CRS" >> ${OUT}
+export NOT_A_TRANSFORMATION='GEOGCRS["WGS 84",DATUM["World Geodetic System 1984 (G2139)",ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1]]],CS[ellipsoidal,2],AXIS["geodetic latitude (Lat)",north,ANGLEUNIT["degree",0.0174532925199433]],AXIS["geodetic longitude (Lon)",east,ANGLEUNIT["degree",0.0174532925199433]]]'
+echo "0 0 0" | $EXE "$NOT_A_TRANSFORMATION" >>${OUT} 2>&1
+
 echo "Test cct with object name initialization" >> ${OUT}
 echo "3541657.3778 948984.2343 5201383.5231 2020.5" | $EXE "ITRF2014 to ETRF2014 (1)"  >>${OUT}
 
@@ -158,6 +162,9 @@ EOF
 echo "Test cct with WKT in a file" >> ${OUT}
 echo "3541657.3778 948984.2343 5201383.5231 2020.5" | $EXE @in.wkt >>${OUT}
 rm in.wkt
+
+echo "Test cct with input file with UTF-8 BOM marker" >> ${OUT}
+$EXE +proj=noop ${TEST_CLI_DIR}/input_with_utf8_bom.txt >> ${OUT}
 
 # do 'diff' with distribution results
 echo "diff ${OUT} with testcct_out.dist"

@@ -45,7 +45,7 @@
 
 *****************************************************************************/
 
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -115,7 +115,7 @@ static PJ_LP lcca_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, inverse
         proj_errno_set(P, PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN);
         return lp;
     }
-    lp.phi = pj_inv_mlfn(P->ctx, S + Q->M0, P->es, Q->en);
+    lp.phi = pj_inv_mlfn(S + Q->M0, Q->en);
 
     return lp;
 }
@@ -140,7 +140,7 @@ PJ *PROJECTION(lcca) {
         return pj_default_destructor (P, PROJ_ERR_OTHER /*ENOMEM*/);
     P->opaque = Q;
 
-    (Q->en = pj_enfn(P->es));
+    (Q->en = pj_enfn(P->n));
     if (!Q->en)
         return pj_default_destructor (P, PROJ_ERR_OTHER /*ENOMEM*/);
 

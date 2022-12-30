@@ -27,7 +27,7 @@
  * DEALINGS IN THE SOFTWARE.
  *****************************************************************************/
 
-#define PJ_LIB__
+#define PJ_LIB_
 #include "proj.h"
 #include <errno.h>
 #include "proj_internal.h"
@@ -105,7 +105,7 @@ static PJ *destructor (PJ *P, int errlev) {                        /* Destructor
 static PJ_XY aea_e_forward (PJ_LP lp, PJ *P) {   /* Ellipsoid/spheroid, forward */
     PJ_XY xy = {0.0,0.0};
     struct pj_opaque *Q = static_cast<struct pj_opaque*>(P->opaque);
-    Q->rho = Q->c - (Q->ellips ? Q->n * pj_qsfn(sin(lp.phi), P->e, P->one_es) : Q->n2 * sin(lp.phi));;
+    Q->rho = Q->c - (Q->ellips ? Q->n * pj_qsfn(sin(lp.phi), P->e, P->one_es) : Q->n2 * sin(lp.phi));
     if (Q->rho < 0.) {
         proj_errno_set(P, PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN);
         return xy;
@@ -190,7 +190,7 @@ static PJ *setup(PJ *P) {
     if( Q->ellips ) {
         double ml1, m1;
 
-        Q->en = pj_enfn(P->es);
+        Q->en = pj_enfn(P->n);
         if (Q->en == nullptr)
             return destructor(P, 0);
         m1 = pj_msfn(sinphi, cosphi, P->es);

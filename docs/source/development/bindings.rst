@@ -11,6 +11,12 @@ Python
 `pyproj <https://pypi.python.org/pypi/pyproj>`_:
 Python interface (wrapper for PROJ)
 
+Java
+====
+
+`PROJ-JNI <https://github.com/OSGeo/PROJ-JNI>`_:
+Java Native Interface for PROJ
+
 Ruby
 =======
 
@@ -30,7 +36,7 @@ Go bindings and idiomatic wrapper for PROJ
 
 Julia
 =====
-`Proj4.jl <https://github.com/JuliaGeo/Proj4.jl>`_:
+`Proj.jl <https://github.com/JuliaGeo/Proj.jl>`_:
 Julia bindings and idiomatic wrapper for PROJ.
 
 TCL

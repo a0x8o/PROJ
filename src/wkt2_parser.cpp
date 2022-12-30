@@ -38,6 +38,7 @@
 
 #include "wkt2_parser.h"
 #include "wkt_parser.hpp"
+#include "proj_constants.h"
 
 using namespace NS_PROJ::internal;
 

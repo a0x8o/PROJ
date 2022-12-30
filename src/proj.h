@@ -172,7 +172,7 @@ extern "C" {
 #endif
 
 /* The version numbers should be updated with every release! **/
-#define PROJ_VERSION_MAJOR 8
+#define PROJ_VERSION_MAJOR 9
 #define PROJ_VERSION_MINOR 2
 #define PROJ_VERSION_PATCH 0
 
@@ -379,12 +379,12 @@ PJ_CONTEXT PROJ_DLL *proj_context_clone (PJ_CONTEXT *ctx);
 
 /** Callback to resolve a filename to a full path */
 typedef const char* (*proj_file_finder) (PJ_CONTEXT *ctx, const char*, void* user_data);
+/*! @endcond */
 
 void PROJ_DLL proj_context_set_file_finder(PJ_CONTEXT *ctx, proj_file_finder finder, void* user_data);
-/*! @endcond */
 void PROJ_DLL proj_context_set_search_paths(PJ_CONTEXT *ctx, int count_paths, const char* const* paths);
-/*! @cond Doxygen_Suppress */
 void PROJ_DLL proj_context_set_ca_bundle_path(PJ_CONTEXT *ctx, const char *path);
+/*! @cond Doxygen_Suppress */
 void PROJ_DLL proj_context_use_proj4_init_rules(PJ_CONTEXT *ctx, int enable);
 int PROJ_DLL proj_context_get_use_proj4_init_rules(PJ_CONTEXT *ctx, int from_legacy_code_path);
 
@@ -454,7 +454,7 @@ void PROJ_DLL proj_context_set_sqlite3_vfs_name(PJ_CONTEXT* ctx, const char* nam
 typedef struct PROJ_NETWORK_HANDLE PROJ_NETWORK_HANDLE;
 
 /** Network access: open callback
- * 
+ *
  * Should try to read the size_to_read first bytes at the specified offset of
  * the file given by URL url,
  * and write them to buffer. *out_size_read should be updated with the actual
@@ -576,6 +576,7 @@ void PROJ_DLL proj_area_set_bbox(PJ_AREA *area,
                                  double south_lat_degree,
                                  double east_lon_degree,
                                  double north_lat_degree);
+void PROJ_DLL proj_area_set_name(PJ_AREA* area, const char* name);
 void PROJ_DLL proj_area_destroy(PJ_AREA* area);
 
 /* Apply transformation to observation - in forward or inverse direction */
@@ -594,6 +595,7 @@ int PROJ_DLL proj_degree_input (PJ *P, enum PJ_DIRECTION dir);
 int PROJ_DLL proj_degree_output (PJ *P, enum PJ_DIRECTION dir);
 
 PJ_COORD PROJ_DLL proj_trans (PJ *P, PJ_DIRECTION direction, PJ_COORD coord);
+PJ PROJ_DLL* proj_trans_get_last_used_operation(PJ* P);
 int PROJ_DLL proj_trans_array (PJ *P, PJ_DIRECTION direction, size_t n, PJ_COORD *coord);
 size_t PROJ_DLL proj_trans_generic (
     PJ *P,
@@ -705,7 +707,8 @@ double PROJ_DLL proj_torad (double angle_in_degrees);
 double PROJ_DLL proj_todeg (double angle_in_radians);
 
 double PROJ_DLL proj_dmstor(const char *is, char **rs);
-char PROJ_DLL * proj_rtodms(char *s, double r, int pos, int neg);
+PROJ_DEPRECATED(char PROJ_DLL * proj_rtodms(char *s, double r, int pos, int neg), "Deprecated by proj_rtodms2");
+char PROJ_DLL * proj_rtodms2(char *s, size_t sizeof_s, double r, int pos, int neg);
 
 void PROJ_DLL proj_cleanup(void);
 
@@ -800,6 +803,8 @@ typedef enum
     PJ_TYPE_TEMPORAL_DATUM,
     PJ_TYPE_ENGINEERING_DATUM,
     PJ_TYPE_PARAMETRIC_DATUM,
+
+    PJ_TYPE_DERIVED_PROJECTED_CRS,
 } PJ_TYPE;
 
 /** Comparison criterion. */
@@ -1304,6 +1309,11 @@ void PROJ_DLL proj_operation_factory_context_set_area_of_interest(
                                             double south_lat_degree,
                                             double east_lon_degree,
                                             double north_lat_degree);
+
+void PROJ_DLL proj_operation_factory_context_set_area_of_interest_name(
+                                            PJ_CONTEXT *ctx,
+                                            PJ_OPERATION_FACTORY_CONTEXT *factory_ctx,
+                                            const char* area_name);
 
 void PROJ_DLL proj_operation_factory_context_set_crs_extent_use(
                                             PJ_CONTEXT *ctx,

@@ -1347,8 +1347,7 @@ TEST(factory, AuthorityFactory_build_all_concatenated) {
         AuthorityFactory::ObjectType::CONCATENATED_OPERATION, false);
     EXPECT_LT(setConcatenatedNoDeprecated.size(), setConcatenated.size());
     for (const auto &code : setConcatenated) {
-        if (in(code,
-               {"8422", "8481", "8482", "8565", "8566", "8572", "9731"})) {
+        if (in(code, {"8422", "8481", "8482", "8565", "8566", "8572"})) {
             EXPECT_THROW(factory->createCoordinateOperation(code, false),
                          FactoryException)
                 << code;
@@ -2763,6 +2762,47 @@ TEST_F(FactoryWithTmpDatabase, lookForGridInfo) {
 
 // ---------------------------------------------------------------------------
 
+TEST_F(FactoryWithTmpDatabase,
+       lookForGridInfo_from_old_name_with_new_grid_available) {
+    createStructure();
+
+    ASSERT_TRUE(execute("INSERT INTO grid_alternatives(original_grid_name,"
+                        "proj_grid_name, "
+                        "old_proj_grid_name, "
+                        "proj_grid_format, "
+                        "proj_method, "
+                        "inverse_direction, "
+                        "package_name, "
+                        "url, direct_download, open_license, directory) "
+                        "VALUES ("
+                        "'NOT-YET-IN-GRID-TRANSFORMATION-original_grid_name', "
+                        "'tests/egm96_15_uncompressed_truncated.tif', "
+                        "'old_name.gtx', "
+                        "'NTv2', "
+                        "'hgridshift', "
+                        "0, "
+                        "NULL, "
+                        "'url', 1, 1, NULL);"))
+        << last_error();
+
+    std::string fullFilename;
+    std::string packageName;
+    std::string url;
+    bool directDownload = false;
+    bool openLicense = false;
+    bool gridAvailable = false;
+    EXPECT_TRUE(DatabaseContext::create(m_ctxt)->lookForGridInfo(
+        "old_name.gtx", false, fullFilename, packageName, url, directDownload,
+        openLicense, gridAvailable));
+    EXPECT_TRUE(
+        fullFilename.find("tests/egm96_15_uncompressed_truncated.tif") !=
+        std::string::npos)
+        << fullFilename;
+    EXPECT_EQ(gridAvailable, true);
+}
+
+// ---------------------------------------------------------------------------
+
 TEST_F(FactoryWithTmpDatabase, custom_geodetic_crs) {
     createStructure();
     populateWithFakeEPSG();
@@ -2981,6 +3021,18 @@ TEST_F(FactoryWithTmpDatabase, custom_projected_crs) {
         if (!res.empty()) {
             EXPECT_EQ(res.front().first->nameStr(), "WKT1_GDAL");
         }
+    }
+
+    {
+        const auto list = factory->getCRSInfoList();
+        bool found = false;
+        for (const auto &info : list) {
+            if (info.authName == "TEST_NS" && info.code == "TEST_BOUND") {
+                found = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(found);
     }
 }
 
@@ -3570,16 +3622,22 @@ TEST(factory, getCRSInfoList) {
         bool foundEPSG = false;
         bool foundIGNF = false;
         bool found4326 = false;
+        bool foundIAU_2015_19902 = false;
         for (const auto &info : list) {
             foundEPSG |= info.authName == "EPSG";
             foundIGNF |= info.authName == "IGNF";
             if (info.authName == "EPSG" && info.code == "4326") {
                 found4326 = true;
+            } else if (info.authName == "IAU_2015" && info.code == "19902") {
+                foundIAU_2015_19902 = true;
+                EXPECT_EQ(info.type,
+                          AuthorityFactory::ObjectType::GEODETIC_CRS);
             }
         }
         EXPECT_TRUE(foundEPSG);
         EXPECT_TRUE(foundIGNF);
         EXPECT_TRUE(found4326);
+        EXPECT_TRUE(foundIAU_2015_19902);
     }
     {
         auto factory = AuthorityFactory::create(ctxt, "EPSG");
@@ -3603,7 +3661,8 @@ TEST(factory, getCRSInfoList) {
                 EXPECT_EQ(info.south_lat_degree, -90.0);
                 EXPECT_EQ(info.east_lon_degree, 180.0);
                 EXPECT_EQ(info.north_lat_degree, 90.0);
-                EXPECT_EQ(info.areaName, "World.");
+                EXPECT_TRUE(std::string(info.areaName).find("World") == 0)
+                    << std::string(info.areaName);
                 EXPECT_TRUE(info.projectionMethodName.empty());
                 found4326 = true;
             } else if (info.code == "4296") { // Soudan - deprecated

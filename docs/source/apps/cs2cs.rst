@@ -13,7 +13,7 @@ Synopsis
 
     | **cs2cs** [**-eEfIlrstvwW** [args]]
     |           [[--area <name_or_code>] | [--bbox <west_long,south_lat,east_long,north_lat>]]
-    |           [--authority <name>] [--no-ballpark] [--accuracy <accuracy>]
+    |           [--authority <name>] [--no-ballpark] [--accuracy <accuracy>] [--3d]
     |           ([*+opt[=arg]* ...] [+to *+opt[=arg]* ...] | {source_crs} {target_crs})
     |           file ...
 
@@ -70,7 +70,7 @@ The following control parameters can appear in any order:
 
     .. versionadded:: 5.2.0
 
-    Specify the number of decimals in the output.
+    Specify the number of decimals to round to in the output.
 
 .. option:: -e <string>
 
@@ -137,7 +137,7 @@ The following control parameters can appear in any order:
 
     Where *n* is the number of significant fractional digits to employ for seconds
     output. When ``-W`` is employed the fields will be constant width
-    with leading zeroes.
+    with leading zeroes. Valid range: -W0 through -W8.
 
 .. option:: -v
 
@@ -194,6 +194,17 @@ The following control parameters can appear in any order:
 
     This option is mutually exclusive with :option:`--bbox`.
 
+.. option:: --3d
+
+    .. versionadded:: 9.1
+
+    "Promote" 2D CRS(s) to their 3D version, where the vertical axis is the
+    ellipsoidal height in metres, using the ellipsoid of the base geodetic CRS.
+    Depending on PROJ versions and the exact nature of the CRS involved,
+    especially before PROJ 9.1, a mix of 2D and 3D CRS could lead to 2D or 3D
+    transformations. Starting with PROJ 9.1, both CRS need to be 3D for vertical
+    transformation to possibly happen.
+
 .. only:: man
 
     The *+opt* run-line arguments are associated with cartographic
@@ -222,7 +233,7 @@ Internally, :program:`cs2cs` uses the :c:func:`proj_create_crs_to_crs` function
 to compute the appropriate coordinate operation, so implementation details of
 this function directly impact the results returned by the program.
 
-The environment parameter :envvar:`PROJ_LIB` establishes the
+The environment parameter :envvar:`PROJ_DATA` establishes the
 directory for resource files (database, datum shift grids, etc.)
 
 One or more files (processed in left to right order) specify the source of
@@ -273,8 +284,12 @@ The x-y output data will appear as three lines of:
 
 ::
 
-    1402293.44  5076292.68 0.00
+    1402285.98  5076292.42 0.00
 
+.. note::
+
+    To get those exact values, you have need to have all current grids installed
+    locally or use networking capabilities mentioned above.
 
 Using EPSG CRS codes
 --------------------
@@ -301,13 +316,19 @@ UTM Zone 31N/WGS 84 with WGS84 ellipsoidal height
 
 ::
 
-    echo 45 2 0 | cs2cs "WGS 84 + EGM96 height" "WGS 84 / UTM zone 31N"
+    echo 45 2 0 | cs2cs "WGS 84 + EGM96 height" "WGS 84 / UTM zone 31N" --3d
 
 outputs
 
 ::
 
     421184.70   4983436.77 50.69
+
+
+.. note::
+
+    To get those exact values, you have need to have the EGM96 grid installed
+    locally or use networking capabilities mentioned above.
 
 
 .. only:: man

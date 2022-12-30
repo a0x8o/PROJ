@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 
 RUN apt-get -y update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-dev python3-pip g++ doxygen dvipng latexmk \
@@ -9,7 +9,7 @@ RUN apt-get -y update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 RUN python3 -m pip install Sphinx breathe \
     sphinx_bootstrap_theme awscli sphinxcontrib-bibtex \
     sphinx_rtd_theme recommonmark sphinx-markdown-tables \
-    sphinxcontrib-spelling
+    sphinxcontrib-spelling!=7.4.0
 
 # Set the locale for spelling
 RUN sed -i -e 's/# en_GB.UTF-8 UTF-8/en_GB.UTF-8 UTF-8/' /etc/locale.gen && \
@@ -19,14 +19,14 @@ RUN sed -i -e 's/# en_GB.UTF-8 UTF-8/en_GB.UTF-8 UTF-8/' /etc/locale.gen && \
 ENV LANG en_GB.UTF-8
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y curl flex bison && \
-        curl -LOs https://doxygen.nl/files/doxygen-1.9.1.src.tar.gz && \
-        tar xvzf doxygen-1.9.1.src.tar.gz && \
-        rm -rf doxygen-1.9.1.src.tar.gz && \
-        cd doxygen-1.9.1 && \
+        curl -LOs https://doxygen.nl/files/doxygen-1.9.5.src.tar.gz && \
+        tar xvzf doxygen-1.9.5.src.tar.gz && \
+        rm -rf doxygen-1.9.5.src.tar.gz && \
+        cd doxygen-1.9.5 && \
         mkdir build && \
         cd build && \
         cmake .. -DCMAKE_INSTALL_PREFIX=/usr && \
         make -j$(nproc) && \
         make install && \
         cd ../.. && \
-        rm -rf doxygen-1.9.1
+        rm -rf doxygen-1.9.5

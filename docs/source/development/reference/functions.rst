@@ -201,8 +201,8 @@ paragraph for more details.
     - ALLOW_BALLPARK=YES/NO: can be set to NO to disallow the use of
       :term:`Ballpark transformation` in the candidate coordinate operations.
 
-    - FORCE_OVER=YES/NO: can be set to YES to force the +over flag on the transformation
-      returned by this function.
+    - FORCE_OVER=YES/NO: can be set to YES to force the ``+over`` flag on the transformation
+      returned by this function. See :ref:`longitude_wrapping`
 
 .. doxygenfunction:: proj_normalize_for_visualization
    :project: doxygen_api
@@ -271,6 +271,21 @@ Coordinate transformation
     :param coord: Coordinate that will be transformed.
     :type coord: :c:type:`PJ_COORD`
     :returns: :c:type:`PJ_COORD`
+
+
+
+.. c:function:: PJ* proj_trans_get_last_used_operation(PJ *P)
+
+    .. versionadded:: 9.1.0
+
+    Return the operation used during the last invokation of proj_trans().
+    This is especially useful when P has been created with proj_create_crs_to_crs()
+    and has several alternative operations.
+    The returned object must be freed with proj_destroy().
+
+    :param P: Transformation object
+    :type P: :c:type:`PJ` *
+    :returns:  :c:type:`PJ` *
 
 
 .. c:function:: size_t proj_trans_generic(PJ *P, PJ_DIRECTION direction, \
@@ -813,8 +828,30 @@ Various
 
     Convert radians to string representation of degrees, minutes and seconds.
 
+    .. deprecated:: 9.2
+       Use :cpp:func:`proj_rtodms2` instead.
+
     :param s: Buffer that holds the output string
     :type s: `char *`
+    :param r: Value to convert to dms-representation
+    :type r: `double`
+    :param pos: Character denoting positive direction, typically `'N'` or `'E'`.
+    :type pos: `int`
+    :param neg: Character denoting negative direction, typically `'S'` or `'W'`.
+    :type neg: `int`
+    :returns: `char*` Pointer to output buffer (same as :c:data:`s`)
+
+
+.. c:function:: char *proj_rtodms2(char *s, size_t sizeof_s, double r, int pos, int neg)
+
+    .. versionadded:: 9.2.0
+
+    Convert radians to string representation of degrees, minutes and seconds.
+
+    :param s: Buffer that holds the output string
+    :type s: `char *`
+    :param sizeof_s: Size of s buffer
+    :type sizeof_s: `size_t`
     :param r: Value to convert to dms-representation
     :type r: `double`
     :param pos: Character denoting positive direction, typically `'N'` or `'E'`.
@@ -880,7 +917,13 @@ Setting custom I/O functions
 .. doxygenfunction:: proj_context_set_sqlite3_vfs_name
    :project: doxygen_api
 
+.. doxygenfunction:: proj_context_set_file_finder
+   :project: doxygen_api
+
 .. doxygenfunction:: proj_context_set_search_paths
+   :project: doxygen_api
+
+.. doxygenfunction:: proj_context_set_ca_bundle_path
    :project: doxygen_api
 
 

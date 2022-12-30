@@ -41,6 +41,7 @@
 #include "proj_json_streaming_writer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <memory>
 #include <string>
@@ -232,6 +233,11 @@ GeographicBoundingBoxNNPtr GeographicBoundingBox::create(double west,
                                                          double south,
                                                          double east,
                                                          double north) {
+    if (std::isnan(west) || std::isnan(south) || std::isnan(east) ||
+        std::isnan(north)) {
+        throw InvalidValueTypeException(
+            "GeographicBoundingBox::create() does not accept NaN values");
+    }
     return GeographicBoundingBox::nn_make_shared<GeographicBoundingBox>(
         west, south, east, north);
 }
@@ -273,7 +279,7 @@ bool GeographicBoundingBox::contains(const GeographicExtentNNPtr &other) const {
     }
 
     if (W == -180.0 && E == 180.0) {
-        return true;
+        return oW != oE;
     }
 
     if (oW == -180.0 && oE == 180.0) {
@@ -330,7 +336,7 @@ bool GeographicBoundingBox::Private::intersects(const Private &other) const {
 
     // Normal bounding box ?
     if (W <= E) {
-        if (oW < oE) {
+        if (oW <= oE) {
             if (std::max(W, oW) < std::min(E, oE)) {
                 return true;
             }
@@ -405,12 +411,12 @@ GeographicBoundingBox::Private::intersection(const Private &otherExtent) const {
 
     // Normal bounding box ?
     if (W <= E) {
-        if (oW < oE) {
-            auto res = internal::make_unique<Private>(
-                std::max(W, oW), std::max(S, oS), std::min(E, oE),
-                std::min(N, oN));
-            if (res->west_ < res->east_) {
-                return res;
+        if (oW <= oE) {
+            const double resW = std::max(W, oW);
+            const double resE = std::min(E, oE);
+            if (resW < resE) {
+                return internal::make_unique<Private>(resW, std::max(S, oS),
+                                                      resE, std::min(N, oN));
             }
             return nullptr;
         }
@@ -1243,14 +1249,14 @@ bool Identifier::isEquivalentName(const char *a, const char *b) noexcept {
     size_t j = 0;
     char lastValidA = 0;
     char lastValidB = 0;
-    while (a[i] != 0 && b[j] != 0) {
+    while (a[i] != 0 || b[j] != 0) {
         char aCh = a[i];
         char bCh = b[j];
-        if (aCh == ' ' && a[i + 1] == '+' && a[i + 2] == ' ') {
+        if (aCh == ' ' && a[i + 1] == '+' && a[i + 2] == ' ' && a[i + 3] != 0) {
             i += 3;
             continue;
         }
-        if (bCh == ' ' && b[j + 1] == '+' && b[j + 2] == ' ') {
+        if (bCh == ' ' && b[j + 1] == '+' && b[j + 2] == ' ' && b[j + 3] != 0) {
             j += 3;
             continue;
         }
@@ -1288,21 +1294,18 @@ bool Identifier::isEquivalentName(const char *a, const char *b) noexcept {
                 j += strlen(replacement->utf8) - 1;
             }
         }
-        if (::tolower(aCh) != ::tolower(bCh)) {
+        if ((aCh == 0 && bCh != 0) || (aCh != 0 && bCh == 0) ||
+            ::tolower(aCh) != ::tolower(bCh)) {
             return false;
         }
         lastValidA = aCh;
         lastValidB = bCh;
-        ++i;
-        ++j;
+        if (aCh != 0)
+            ++i;
+        if (bCh != 0)
+            ++j;
     }
-    while (a[i] != 0 && isIgnoredChar(a[i])) {
-        ++i;
-    }
-    while (b[j] != 0 && isIgnoredChar(b[j])) {
-        ++j;
-    }
-    return a[i] == b[j];
+    return true;
 }
 
 // ---------------------------------------------------------------------------

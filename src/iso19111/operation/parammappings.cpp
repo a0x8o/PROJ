@@ -561,6 +561,10 @@ static const MethodMapping projectionMethodMappings[] = {
     {EPSG_NAME_METHOD_TRANSVERSE_MERCATOR, EPSG_CODE_METHOD_TRANSVERSE_MERCATOR,
      "Transverse_Mercator", "tmerc", nullptr, paramsNatOriginScaleK},
 
+    {EPSG_NAME_METHOD_TRANSVERSE_MERCATOR_3D,
+     EPSG_CODE_METHOD_TRANSVERSE_MERCATOR_3D, "Transverse_Mercator", "tmerc",
+     nullptr, paramsNatOriginScaleK},
+
     {EPSG_NAME_METHOD_TRANSVERSE_MERCATOR_SOUTH_ORIENTATED,
      EPSG_CODE_METHOD_TRANSVERSE_MERCATOR_SOUTH_ORIENTATED,
      "Transverse_Mercator_South_Orientated", "tmerc", "axis=wsu",
@@ -626,13 +630,13 @@ static const MethodMapping projectionMethodMappings[] = {
     {PROJ_WKT2_NAME_METHOD_COMPACT_MILLER, 0, "Compact_Miller", "comill",
      nullptr, paramsLonNatOrigin},
 
-    {EPSG_NAME_METHOD_LAMBERT_CYLINDRICAL_EQUAL_AREA_SPHERICAL,
-     EPSG_CODE_METHOD_LAMBERT_CYLINDRICAL_EQUAL_AREA_SPHERICAL,
-     "Cylindrical_Equal_Area", "cea", nullptr, paramsCEA},
-
     {EPSG_NAME_METHOD_LAMBERT_CYLINDRICAL_EQUAL_AREA,
      EPSG_CODE_METHOD_LAMBERT_CYLINDRICAL_EQUAL_AREA, "Cylindrical_Equal_Area",
      "cea", nullptr, paramsCEA},
+
+    {EPSG_NAME_METHOD_LAMBERT_CYLINDRICAL_EQUAL_AREA_SPHERICAL,
+     EPSG_CODE_METHOD_LAMBERT_CYLINDRICAL_EQUAL_AREA_SPHERICAL,
+     "Cylindrical_Equal_Area", "cea", "R_A", paramsCEA},
 
     {EPSG_NAME_METHOD_CASSINI_SOLDNER, EPSG_CODE_METHOD_CASSINI_SOLDNER,
      "Cassini_Soldner", "cass", nullptr, paramsNatOrigin},
@@ -728,7 +732,7 @@ static const MethodMapping projectionMethodMappings[] = {
 
     {EPSG_NAME_METHOD_LAMBERT_AZIMUTHAL_EQUAL_AREA_SPHERICAL,
      EPSG_CODE_METHOD_LAMBERT_AZIMUTHAL_EQUAL_AREA_SPHERICAL,
-     "Lambert_Azimuthal_Equal_Area", "laea", nullptr, paramsLaea},
+     "Lambert_Azimuthal_Equal_Area", "laea", "R_A", paramsLaea},
 
     {PROJ_WKT2_NAME_METHOD_MILLER_CYLINDRICAL, 0, "Miller_Cylindrical", "mill",
      "R_A", paramsMiller},
@@ -788,6 +792,12 @@ static const MethodMapping projectionMethodMappings[] = {
 
     {PROJ_WKT2_NAME_METHOD_ROBINSON, 0, "Robinson", "robin", nullptr,
      paramsLonNatOriginLongitudeCentre},
+
+    {PROJ_WKT2_NAME_METHOD_PEIRCE_QUINCUNCIAL_SQUARE, 0, nullptr, "peirce_q",
+     "shape=square", paramsNatOriginScale},
+
+    {PROJ_WKT2_NAME_METHOD_PEIRCE_QUINCUNCIAL_DIAMOND, 0, nullptr, "peirce_q",
+     "shape=diamond", paramsNatOriginScale},
 
     {PROJ_WKT2_NAME_METHOD_SINUSOIDAL, 0, "Sinusoidal", "sinu", nullptr,
      paramsLonNatOriginLongitudeCentre},
@@ -956,9 +966,12 @@ const struct MethodNameCode methodNameCodes[] = {
     METHOD_NAME_CODE(GEOGRAPHIC2D_WITH_HEIGHT_OFFSETS),
     METHOD_NAME_CODE(GEOGRAPHIC3D_OFFSETS),
     METHOD_NAME_CODE(VERTICAL_OFFSET),
+    METHOD_NAME_CODE(VERTICAL_OFFSET_AND_SLOPE),
     METHOD_NAME_CODE(NTV2),
     METHOD_NAME_CODE(NTV1),
     METHOD_NAME_CODE(NADCON),
+    METHOD_NAME_CODE(NADCON5_2D),
+    METHOD_NAME_CODE(NADCON5_3D),
     METHOD_NAME_CODE(VERTCON),
     METHOD_NAME_CODE(GEOCENTRIC_TRANSLATION_BY_GRID_INTERPOLATION_IGN),
 };
@@ -1040,6 +1053,10 @@ const struct ParamNameCode paramNameCodes[] = {
     PARAM_NAME_CODE(ORDINATE_2_EVAL_POINT),
     PARAM_NAME_CODE(ORDINATE_3_EVAL_POINT),
     PARAM_NAME_CODE(GEOCENTRIC_TRANSLATION_FILE),
+    PARAM_NAME_CODE(INCLINATION_IN_LATITUDE),
+    PARAM_NAME_CODE(INCLINATION_IN_LONGITUDE),
+    PARAM_NAME_CODE(EPSG_CODE_FOR_HORIZONTAL_CRS),
+    PARAM_NAME_CODE(EPSG_CODE_FOR_INTERPOLATION_CRS),
 };
 
 const ParamNameCode *getParamNameCodes(size_t &nElts) {
@@ -1246,6 +1263,21 @@ static const ParamMapping *const paramsGeographic3DOffsets[] = {
 static const ParamMapping *const paramsVerticalOffsets[] = {
     &paramVerticalOffset, nullptr};
 
+static const ParamMapping paramInclinationInLatitude = {
+    EPSG_NAME_PARAMETER_INCLINATION_IN_LATITUDE,
+    EPSG_CODE_PARAMETER_INCLINATION_IN_LATITUDE, nullptr,
+    common::UnitOfMeasure::Type::ANGULAR, nullptr};
+
+static const ParamMapping paramInclinationInLongitude = {
+    EPSG_NAME_PARAMETER_INCLINATION_IN_LONGITUDE,
+    EPSG_CODE_PARAMETER_INCLINATION_IN_LONGITUDE, nullptr,
+    common::UnitOfMeasure::Type::ANGULAR, nullptr};
+
+static const ParamMapping *const paramsVerticalOffsetAndSlope[] = {
+    &paramOrdinate1EvalPoint,     &paramOrdinate2EvalPoint,
+    &paramVerticalOffset,         &paramInclinationInLatitude,
+    &paramInclinationInLongitude, nullptr};
+
 static const ParamMapping paramLatitudeLongitudeDifferenceFile = {
     EPSG_NAME_PARAMETER_LATITUDE_LONGITUDE_DIFFERENCE_FILE,
     EPSG_CODE_PARAMETER_LATITUDE_LONGITUDE_DIFFERENCE_FILE, nullptr,
@@ -1275,6 +1307,18 @@ static const ParamMapping paramLongitudeDifferenceFile = {
 
 static const ParamMapping *const paramsNADCON[] = {
     &paramLatitudeDifferenceFile, &paramLongitudeDifferenceFile, nullptr};
+
+static const ParamMapping *const paramsNADCON5_2D[] = {
+    &paramLatitudeDifferenceFile, &paramLongitudeDifferenceFile, nullptr};
+
+static const ParamMapping paramEllipsoidalHeightDifference = {
+    EPSG_NAME_PARAMETER_ELLIPSOIDAL_HEIGHT_DIFFERENCE_FILE,
+    EPSG_CODE_PARAMETER_ELLIPSOIDAL_HEIGHT_DIFFERENCE_FILE, nullptr,
+    common::UnitOfMeasure::Type::NONE, nullptr};
+
+static const ParamMapping *const paramsNADCON5_3D[] = {
+    &paramLatitudeDifferenceFile, &paramLongitudeDifferenceFile,
+    &paramEllipsoidalHeightDifference, nullptr};
 
 static const ParamMapping paramVerticalOffsetFile = {
     EPSG_NAME_PARAMETER_VERTICAL_OFFSET_FILE,
@@ -1440,6 +1484,10 @@ static const MethodMapping otherMethodMappings[] = {
     {EPSG_NAME_METHOD_VERTICAL_OFFSET, EPSG_CODE_METHOD_VERTICAL_OFFSET,
      nullptr, nullptr, nullptr, paramsVerticalOffsets},
 
+    {EPSG_NAME_METHOD_VERTICAL_OFFSET_AND_SLOPE,
+     EPSG_CODE_METHOD_VERTICAL_OFFSET_AND_SLOPE, nullptr, nullptr, nullptr,
+     paramsVerticalOffsetAndSlope},
+
     {EPSG_NAME_METHOD_NTV2, EPSG_CODE_METHOD_NTV2, nullptr, nullptr, nullptr,
      paramsNTV2},
 
@@ -1452,6 +1500,12 @@ static const MethodMapping otherMethodMappings[] = {
 
     {EPSG_NAME_METHOD_NADCON, EPSG_CODE_METHOD_NADCON, nullptr, nullptr,
      nullptr, paramsNADCON},
+
+    {EPSG_NAME_METHOD_NADCON5_2D, EPSG_CODE_METHOD_NADCON5_2D, nullptr, nullptr,
+     nullptr, paramsNADCON5_2D},
+
+    {EPSG_NAME_METHOD_NADCON5_3D, EPSG_CODE_METHOD_NADCON5_3D, nullptr, nullptr,
+     nullptr, paramsNADCON5_3D},
 
     {EPSG_NAME_METHOD_VERTCON, EPSG_CODE_METHOD_VERTCON, nullptr, nullptr,
      nullptr, paramsVERTCON},

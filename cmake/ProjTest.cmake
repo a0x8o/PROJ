@@ -6,7 +6,7 @@ function(proj_test_set_properties TESTNAME)
   set_property(TEST ${TESTNAME}
     PROPERTY ENVIRONMENT
       "PROJ_SKIP_READ_USER_WRITABLE_DIRECTORY=YES"
-      "PROJ_LIB=${PROJ_BINARY_DIR}/data/for_tests")
+      "PROJ_DATA=${PROJ_BINARY_DIR}/data/for_tests")
 endfunction()
 
 function(proj_add_test_script_sh SH_NAME BIN_USE)
@@ -39,6 +39,7 @@ endfunction()
 
 # Create user writable directory for tests
 add_custom_target(create_tmp_user_writable_dir ALL
+                  COMMAND ${CMAKE_COMMAND} -E remove_directory ${PROJ_BINARY_DIR}/tmp_user_writable_dir
                   COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJ_BINARY_DIR}/tmp_user_writable_dir)
 
 function(proj_add_gie_network_dependent_test TESTNAME TESTCASE)
@@ -54,6 +55,6 @@ function(proj_add_gie_network_dependent_test TESTNAME TESTCASE)
         PROPERTY ENVIRONMENT
           "PROJ_USER_WRITABLE_DIRECTORY=${PROJ_BINARY_DIR}/tmp_user_writable_dir"
           "PROJ_NETWORK=ON"
-          "PROJ_LIB=${PROJ_BINARY_DIR}/data/for_tests")
+          "PROJ_DATA=${PROJ_BINARY_DIR}/data/for_tests")
 
 endfunction()

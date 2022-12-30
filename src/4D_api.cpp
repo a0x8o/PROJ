@@ -201,6 +201,16 @@ double proj_roundtrip (PJ *P, PJ_DIRECTION direction, int n, PJ_COORD *coord) {
     return proj_xyz_dist (org, t);
 }
 
+// Returns true if the passed operation uses NADCON5 grids for NAD83 to NAD83(HARN)
+static bool isSpecialCaseForNAD83_to_NAD83HARN(const PJCoordOperation& op)
+{
+    return op.name.find("NAD83 to NAD83(HARN) (47)") != std::string::npos ||
+           op.name.find("NAD83 to NAD83(HARN) (48)") != std::string::npos ||
+           op.name.find("NAD83 to NAD83(HARN) (49)") != std::string::npos ||
+           op.name.find("NAD83 to NAD83(HARN) (50)") != std::string::npos;
+}
+
+
 /**************************************************************************************/
 int pj_get_suggested_operation(PJ_CONTEXT*,
                                const std::vector<PJCoordOperation>& opList,
@@ -248,10 +258,11 @@ int pj_get_suggested_operation(PJ_CONTEXT*,
                  // If two operations have the same accuracy, use the one that
                  // is contained within a larger one
                  (alt.accuracy == bestAccuracy &&
-                  alt.minxSrc > opList[iBest].minxSrc &&
-                  alt.minySrc > opList[iBest].minySrc &&
-                  alt.maxxSrc < opList[iBest].maxxSrc &&
-                  alt.maxySrc < opList[iBest].maxySrc)) &&
+                  alt.minxSrc >= opList[iBest].minxSrc &&
+                  alt.minySrc >= opList[iBest].minySrc &&
+                  alt.maxxSrc <= opList[iBest].maxxSrc &&
+                  alt.maxySrc <= opList[iBest].maxySrc &&
+                  !isSpecialCaseForNAD83_to_NAD83HARN(opList[iBest]))) &&
                 !alt.isOffshore) ) {
                 iBest = i;
                 bestAccuracy = alt.accuracy;
@@ -275,6 +286,13 @@ similarly, but prefers the 2D resp. 3D interfaces if available.
         return coord;
     if (P->inverted)
         direction = opposite_direction(direction);
+
+    if (P->iso_obj != nullptr &&
+        !P->iso_obj_is_coordinate_operation ) {
+        pj_log(P->ctx, PJ_LOG_ERROR, "Object is not a coordinate operation");
+        proj_errno_set (P, PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
+        return proj_coord_error ();
+    }
 
     if( !P->alternativeCoordinateOperations.empty() ) {
         constexpr int N_MAX_RETRY = 2;
@@ -319,8 +337,11 @@ similarly, but prefers the 2D resp. 3D interfaces if available.
                 }
                 P->iCurCoordOp = iBest;
             }
-            PJ_COORD res = direction == PJ_FWD ?
-                        pj_fwd4d( coord, alt.pj ) : pj_inv4d( coord, alt.pj );
+            PJ_COORD res = coord;
+            if( direction == PJ_FWD )
+                pj_fwd4d( res, alt.pj );
+            else
+                pj_inv4d( res, alt.pj );
             if( proj_errno(alt.pj) == PROJ_ERR_OTHER_NETWORK_ERROR ) {
                 return proj_coord_error ();
             }
@@ -361,11 +382,12 @@ similarly, but prefers the 2D resp. 3D interfaces if available.
                         P->iCurCoordOp = i;
                     }
                     if( direction == PJ_FWD ) {
-                        return pj_fwd4d( coord, alt.pj );
+                        pj_fwd4d( coord, alt.pj );
                     }
                     else {
-                        return pj_inv4d( coord, alt.pj );
+                        pj_inv4d( coord, alt.pj );
                     }
+                    return coord;
                 }
             }
         }
@@ -374,13 +396,29 @@ similarly, but prefers the 2D resp. 3D interfaces if available.
         return proj_coord_error ();
     }
 
+    P->iCurCoordOp = 0; // dummy value, to be used by proj_trans_get_last_used_operation()
     if (direction == PJ_FWD)
-        return pj_fwd4d (coord, P);
+        pj_fwd4d (coord, P);
     else
-        return pj_inv4d (coord, P);
+        pj_inv4d (coord, P);
+    return coord;
 }
 
-
+/*****************************************************************************/
+PJ* proj_trans_get_last_used_operation(PJ* P)
+/******************************************************************************
+    Return the operation used during the last invokation of proj_trans().
+    This is especially useful when P has been created with proj_create_crs_to_crs()
+    and has several alternative operations.
+    The returned object must be freed with proj_destroy().
+******************************************************************************/
+{
+    if( nullptr==P || P->iCurCoordOp < 0 )
+        return nullptr;
+    if( P->alternativeCoordinateOperations.empty() )
+        return proj_clone(P->ctx, P);
+    return proj_clone(P->ctx, P->alternativeCoordinateOperations[P->iCurCoordOp].pj);
+}
 
 /*****************************************************************************/
 int proj_trans_array (PJ *P, PJ_DIRECTION direction, size_t n, PJ_COORD *coord) {
@@ -616,7 +654,14 @@ double proj_dmstor(const char *is, char **rs) {
 }
 
 char*  proj_rtodms(char *s, double r, int pos, int neg) {
-    return rtodms(s, r, pos, neg);
+    // 40 is the size used for the buffer in proj.cpp
+    size_t arbitrary_size = 40;
+    return rtodms(s, arbitrary_size, r, pos, neg);
+}
+
+char * proj_rtodms2(char *s, size_t sizeof_s, double r, int pos, int neg)
+{
+    return rtodms(s, sizeof_s, r, pos, neg);
 }
 
 /*************************************************************************************/
@@ -659,10 +704,11 @@ Returns 1 on success, 0 on failure
 
     /* Don't axisswap if data are already in "enu" order */
     if (p && (0!=strcmp ("enu", p->param))) {
-        char *def = static_cast<char*>(malloc (100+strlen(P->axis)));
+        size_t def_size = 100+strlen(P->axis);
+        char *def = static_cast<char*>(malloc (def_size));
         if (nullptr==def)
             return 0;
-        sprintf (def, "break_cs2cs_recursion     proj=axisswap  axis=%s", P->axis);
+        snprintf (def, def_size, "break_cs2cs_recursion     proj=axisswap  axis=%s", P->axis);
         Q = pj_create_internal (P->ctx, def);
         free (def);
         if (nullptr==Q)
@@ -674,11 +720,12 @@ Returns 1 on success, 0 on failure
     p = pj_param_exists (P->params, "geoidgrids");
     if (!disable_grid_presence_check && p  &&  strlen (p->param) > strlen ("geoidgrids=")) {
         char *gridnames = p->param + strlen ("geoidgrids=");
-        char *def = static_cast<char*>(malloc (100+2*strlen(gridnames)));
+        size_t def_size = 100+2*strlen(gridnames);
+        char *def = static_cast<char*>(malloc (def_size));
         if (nullptr==def)
             return 0;
-        sprintf (def, "break_cs2cs_recursion     proj=vgridshift  grids=%s",
-                 pj_double_quote_string_param_if_needed(gridnames).c_str());
+        snprintf (def, def_size, "break_cs2cs_recursion     proj=vgridshift  grids=%s",
+                  pj_double_quote_string_param_if_needed(gridnames).c_str());
         Q = pj_create_internal (P->ctx, def);
         free (def);
         if (nullptr==Q)
@@ -690,11 +737,12 @@ Returns 1 on success, 0 on failure
     p = pj_param_exists (P->params, "nadgrids");
     if (!disable_grid_presence_check && p  &&  strlen (p->param) > strlen ("nadgrids=")) {
         char *gridnames = p->param + strlen ("nadgrids=");
-        char *def = static_cast<char*>(malloc (100+2*strlen(gridnames)));
+        size_t def_size = 100+2*strlen(gridnames);
+        char *def = static_cast<char*>(malloc (def_size));
         if (nullptr==def)
             return 0;
-        sprintf (def, "break_cs2cs_recursion     proj=hgridshift  grids=%s",
-                 pj_double_quote_string_param_if_needed(gridnames).c_str());
+        snprintf (def, def_size, "break_cs2cs_recursion     proj=hgridshift  grids=%s",
+                  pj_double_quote_string_param_if_needed(gridnames).c_str());
         Q = pj_create_internal (P->ctx, def);
         free (def);
         if (nullptr==Q)
@@ -723,10 +771,11 @@ Returns 1 on success, 0 on failure
         if (n <= 8) /* 8==strlen ("towgs84=") */
             return 0;
 
-        def = static_cast<char*>(malloc (100+n));
+        size_t def_size = 100+n;
+        def = static_cast<char*>(malloc (def_size));
         if (nullptr==def)
             return 0;
-        sprintf (def, "break_cs2cs_recursion     proj=helmert exact %s convention=position_vector", s);
+        snprintf (def, def_size, "break_cs2cs_recursion     proj=helmert exact %s convention=position_vector", s);
         Q = pj_create_internal (P->ctx, def);
         free(def);
         if (nullptr==Q)
@@ -741,7 +790,7 @@ Returns 1 on success, 0 on failure
     /* geocentric/cartesian space or we need to do a Helmert transform.         */
     if (P->is_geocent || P->helmert || do_cart) {
         char def[150];
-        sprintf (def, "break_cs2cs_recursion     proj=cart   a=%40.20g  es=%40.20g", P->a_orig, P->es_orig);
+        snprintf (def, sizeof(def), "break_cs2cs_recursion     proj=cart   a=%40.20g  es=%40.20g", P->a_orig, P->es_orig);
         {
             /* In case the current locale does not use dot but comma as decimal */
             /* separator, replace it with dot, so that proj_atof() behaves */
@@ -759,7 +808,7 @@ Returns 1 on success, 0 on failure
         P->cart = skip_prep_fin (Q);
 
         if (!P->is_geocent) {
-            sprintf (def, "break_cs2cs_recursion     proj=cart  ellps=WGS84");
+            snprintf (def, sizeof(def), "break_cs2cs_recursion     proj=cart  ellps=WGS84");
             Q = pj_create_internal (P->ctx, def);
             if (nullptr==Q)
                 return 0;
@@ -880,7 +929,7 @@ For use by pipeline init function.
 
 /** Create an area of use */
 PJ_AREA * proj_area_create(void) {
-    return static_cast<PJ_AREA*>(calloc(1, sizeof(PJ_AREA)));
+    return new PJ_AREA();
 }
 
 /** Assign a bounding box to an area of use. */
@@ -896,9 +945,15 @@ void proj_area_set_bbox(PJ_AREA *area,
     area->north_lat_degree = north_lat_degree;
 }
 
+/** Assign the name of an area of use. */
+void proj_area_set_name(PJ_AREA *area,
+                        const char* name) {
+    area->name = name;
+}
+
 /** Free an area of use */
 void proj_area_destroy(PJ_AREA* area) {
-    free(area);
+    delete area;
 }
 
 /************************************************************************/
@@ -990,7 +1045,7 @@ static double simple_max(const double* data, const int arr_len) {
 
 
 // ---------------------------------------------------------------------------
-static int _find_previous_index(const int iii, const double* data, const int arr_len) {
+static int find_previous_index(const int iii, const double* data, const int arr_len) {
     // find index of nearest valid previous value if exists
     int prev_iii = iii - 1;
     if (prev_iii == -1)  // handle wraparound
@@ -1060,7 +1115,7 @@ static double antimeridian_min(const double* data, const int arr_len) {
     for( int iii = 0; iii < arr_len; iii++ ) {
         if (data[iii] == HUGE_VAL)
             continue;
-        int prev_iii = _find_previous_index(iii, data, arr_len);
+        int prev_iii = find_previous_index(iii, data, arr_len);
         // check if crossed meridian
         double delta = data[prev_iii] - data[iii];
         // 180 -> -180
@@ -1109,7 +1164,7 @@ static double antimeridian_max(const double* data, const int arr_len) {
     for( int iii = 0; iii < arr_len; iii++ ) {
         if (data[iii] == HUGE_VAL)
             continue;
-        int prev_iii = _find_previous_index(iii, data, arr_len);
+        int prev_iii = find_previous_index(iii, data, arr_len);
         // check if crossed meridian
         double delta = data[prev_iii] - data[iii];
         // 180 -> -180
@@ -1895,6 +1950,13 @@ PJ  *proj_create_crs_to_crs_from_pj (PJ_CONTEXT *ctx, const PJ *source_crs, cons
                                             area->south_lat_degree,
                                             area->east_lon_degree,
                                             area->north_lat_degree);
+
+        if( !area->name.empty() ) {
+            proj_operation_factory_context_set_area_of_interest_name(
+                                            ctx,
+                                            operation_ctx,
+                                            area->name.c_str());
+        }
     }
 
     proj_operation_factory_context_set_spatial_criterion(
@@ -1925,7 +1987,7 @@ PJ  *proj_create_crs_to_crs_from_pj (PJ_CONTEXT *ctx, const PJ *source_crs, cons
     PJ* P = proj_list_get(ctx, op_list, 0);
     assert(P);
 
-    if( P == nullptr || op_count == 1 || (area && area->bbox_set) ||
+    if( P == nullptr || op_count == 1 ||
         proj_get_type(source_crs) == PJ_TYPE_GEOCENTRIC_CRS ||
         proj_get_type(target_crs) == PJ_TYPE_GEOCENTRIC_CRS ) {
         proj_list_destroy(op_list);
@@ -2150,10 +2212,9 @@ PJ_INFO proj_info (void) {
     info.minor = PROJ_VERSION_MINOR;
     info.patch = PROJ_VERSION_PATCH;
 
-    /* This is a controlled environment, so no risk of sprintf buffer
-    overflow. A normal version string is xx.yy.zz which is 8 characters
+    /* A normal version string is xx.yy.zz which is 8 characters
     long and there is room for 64 bytes in the version string. */
-    sprintf (version, "%d.%d.%d", info.major, info.minor, info.patch);
+    snprintf (version, sizeof(version), "%d.%d.%d", info.major, info.minor, info.patch);
 
     info.version    = version;
     info.release    = pj_get_release ();
@@ -2200,13 +2261,16 @@ PJ_PROJ_INFO proj_pj_info(PJ *P) {
         return pjinfo;
 
     /* coordinate operation description */
-    if( P->iCurCoordOp >= 0 ) {
-        P = P->alternativeCoordinateOperations[P->iCurCoordOp].pj;
-    } else if( !P->alternativeCoordinateOperations.empty() ) {
-        pjinfo.id = "unknown";
-        pjinfo.description = "unavailable until proj_trans is called";
-        pjinfo.definition = "unavailable until proj_trans is called";
-        return pjinfo;
+    if( !P->alternativeCoordinateOperations.empty() )
+    {
+        if( P->iCurCoordOp >= 0 ) {
+            P = P->alternativeCoordinateOperations[P->iCurCoordOp].pj;
+        } else {
+            pjinfo.id = "unknown";
+            pjinfo.description = "unavailable until proj_trans is called";
+            pjinfo.definition = "unavailable until proj_trans is called";
+            return pjinfo;
+        }
     }
 
     /* projection id */
@@ -2276,7 +2340,11 @@ PJ_GRID_INFO proj_grid_info(const char *gridname) {
         strncpy (grinfo.gridname, gridname, sizeof(grinfo.gridname) - 1);
 
         /* full path of grid */
-        pj_find_file(ctx, gridname, grinfo.filename, sizeof(grinfo.filename) - 1);
+        if( !pj_find_file(ctx, gridname, grinfo.filename, sizeof(grinfo.filename) - 1) )
+        {
+            // Can happen when using a remote grid
+            grinfo.filename[0] = 0;
+        }
 
         /* grid format */
         strncpy (grinfo.format, format.c_str(), sizeof(grinfo.format) - 1);

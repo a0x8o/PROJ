@@ -14,11 +14,13 @@ systems are based on different datums.
    defmodel
    deformation
    geogoffset
+   gridshift
    helmert
    horner
    molodensky
    molobadekas
    hgridshift
    tinshift
+   vertoffset
    vgridshift
    xyzgridshift

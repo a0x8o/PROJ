@@ -20,7 +20,7 @@
  * DEALINGS IN THE SOFTWARE.
  *****************************************************************************/
 
-#define PJ_LIB__
+#define PJ_LIB_
 #include <errno.h>
 #include "proj.h"
 #include "proj_internal.h"
@@ -94,7 +94,7 @@ PJ *PROJECTION(ccon) {
         proj_log_error(P, _("Invalid value for lat_1: |lat_1| should be > 0"));
         return destructor(P, PROJ_ERR_INVALID_OP_ILLEGAL_ARG_VALUE);
     }
-    if (!(Q->en = pj_enfn(P->es)))
+    if (!(Q->en = pj_enfn(P->n)))
         return destructor(P, PROJ_ERR_OTHER /*ENOMEM*/);
 
     Q->sinphi1 = sin(Q->phi1);

@@ -12,7 +12,7 @@
 
 #include <limits>
 
-#define PJ_LIB__
+#define PJ_LIB_
 #include "proj.h"
 #include "proj_internal.h"
 #include <math.h>
@@ -146,7 +146,6 @@ namespace { // anonymous namespace
 struct isea_dgg {
     int polyhedron; /* ignored, icosahedron */
     double  o_lat, o_lon, o_az; /* orientation, radians */
-    int pole; /* true if standard snyder */
     int topology; /* ignored, hexagon */
     int aperture; /* valid values depend on partitioning method */
     int resolution;
@@ -289,7 +288,7 @@ static struct isea_pt isea_triangle_xy(int triangle)
     default:
         /* should be impossible */
         exit(EXIT_FAILURE);
-    };
+    }
     c.x *= Rprime;
     c.y *= Rprime;
 
@@ -482,9 +481,6 @@ static int isea_snyder_forward(struct isea_geo * ll, struct isea_pt * out)
             PJ_TODEG(ll->lon), PJ_TODEG(ll->lat));
 
     exit(EXIT_FAILURE);
-
-    /* not reached */
-    return 0;       /* suppresses a warning */
 }
 
 #ifdef _MSC_VER

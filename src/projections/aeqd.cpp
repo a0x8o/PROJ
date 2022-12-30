@@ -25,7 +25,7 @@
  * DEALINGS IN THE SOFTWARE.
  *****************************************************************************/
 
-#define PJ_LIB__
+#define PJ_LIB_
 #include "geodesic.h"
 #include "proj.h"
 #include <errno.h>
@@ -104,7 +104,7 @@ static PJ_XY aeqd_e_forward (PJ_LP lp, PJ *P) {          /* Ellipsoidal, forward
     switch (Q->mode) {
     case N_POLE:
         coslam = - coslam;
-        /*-fallthrough*/
+        PROJ_FALLTHROUGH;
     case S_POLE:
         rho = fabs(Q->Mp - pj_mlfn(lp.phi, sinphi, cosphi, Q->en));
         xy.x = rho * sin(lp.lam);
@@ -135,46 +135,76 @@ static PJ_XY aeqd_e_forward (PJ_LP lp, PJ *P) {          /* Ellipsoidal, forward
 static PJ_XY aeqd_s_forward (PJ_LP lp, PJ *P) {           /* Spheroidal, forward */
     PJ_XY xy = {0.0,0.0};
     struct pj_opaque *Q = static_cast<struct pj_opaque*>(P->opaque);
-    double  coslam, cosphi, sinphi;
 
-    sinphi = sin(lp.phi);
-    cosphi = cos(lp.phi);
-    coslam = cos(lp.lam);
-    switch (Q->mode) {
-    case EQUIT:
+    if (Q->mode == EQUIT)
+    {
+        const double cosphi = cos(lp.phi);
+        const double sinphi = sin(lp.phi);
+        const double coslam = cos(lp.lam);
+        const double sinlam = sin(lp.lam);
+
         xy.y = cosphi * coslam;
-        goto oblcon;
-    case OBLIQ:
-        xy.y = Q->sinph0 * sinphi + Q->cosph0 * cosphi * coslam;
-oblcon:
+
         if (fabs(fabs(xy.y) - 1.) < TOL)
+        {
             if (xy.y < 0.) {
                 proj_errno_set(P, PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN);
                 return xy;
             }
             else
                 return aeqd_e_forward(lp, P);
-        else {
+        }
+        else
+        {
             xy.y = acos(xy.y);
             xy.y /= sin(xy.y);
-            xy.x = xy.y * cosphi * sin(lp.lam);
-            xy.y *= (Q->mode == EQUIT) ? sinphi :
-                Q->cosph0 * sinphi - Q->sinph0 * cosphi * coslam;
+            xy.x = xy.y * cosphi * sinlam;
+            xy.y *= sinphi;
         }
-        break;
-    case N_POLE:
-        lp.phi = -lp.phi;
-        coslam = -coslam;
-        /*-fallthrough*/
-    case S_POLE:
+    }
+    else if (Q->mode == OBLIQ)
+    {
+        const double cosphi = cos(lp.phi);
+        const double sinphi = sin(lp.phi);
+        const double coslam = cos(lp.lam);
+        const double sinlam = sin(lp.lam);
+        const double cosphi_x_coslam = cosphi * coslam;
+
+        xy.y = Q->sinph0 * sinphi + Q->cosph0 * cosphi_x_coslam;
+
+        if (fabs(fabs(xy.y) - 1.) < TOL)
+        {
+            if (xy.y < 0.) {
+                proj_errno_set(P, PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN);
+                return xy;
+            }
+            else
+                return aeqd_e_forward(lp, P);
+        }
+        else
+        {
+            xy.y = acos(xy.y);
+            xy.y /= sin(xy.y);
+            xy.x = xy.y * cosphi * sinlam;
+            xy.y *= Q->cosph0 * sinphi - Q->sinph0 * cosphi_x_coslam;
+        }
+    }
+    else
+    {
+        double coslam = cos(lp.lam);
+        double sinlam = sin(lp.lam);
+        if (Q->mode == N_POLE)
+        {
+            lp.phi = -lp.phi;
+            coslam = -coslam;
+        }
         if (fabs(lp.phi - M_HALFPI) < EPS10) {
             proj_errno_set(P, PROJ_ERR_COORD_TRANSFM_OUTSIDE_PROJECTION_DOMAIN);
             return xy;
         }
         xy.y = (M_HALFPI + lp.phi);
-        xy.x = xy.y * sin(lp.lam);
+        xy.x = xy.y * sinlam;
         xy.y *= coslam;
-        break;
     }
     return xy;
 }
@@ -191,8 +221,7 @@ static PJ_LP e_guam_inv(PJ_XY xy, PJ *P) { /* Guam elliptical */
     for (i = 0; i < 3; ++i) {
         t = P->e * sin(lp.phi);
         t = sqrt(1. - t * t);
-        lp.phi = pj_inv_mlfn(P->ctx, Q->M1 + xy.y -
-            x2 * tan(lp.phi) * t, P->es, Q->en);
+        lp.phi = pj_inv_mlfn(Q->M1 + xy.y - x2 * tan(lp.phi) * t, Q->en);
     }
     lp.lam = xy.x * t / cos(lp.phi);
     return lp;
@@ -223,8 +252,7 @@ static PJ_LP aeqd_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, inverse
         lp.lam = lon2 * DEG_TO_RAD;
         lp.lam -= P->lam0;
     } else { /* Polar */
-        lp.phi = pj_inv_mlfn(P->ctx, Q->mode == N_POLE ? Q->Mp - c : Q->Mp + c,
-            P->es, Q->en);
+        lp.phi = pj_inv_mlfn(Q->mode == N_POLE ? Q->Mp - c : Q->Mp + c, Q->en);
         lp.lam = atan2(xy.x, Q->mode == N_POLE ? -xy.y : xy.y);
     }
     return lp;
@@ -299,7 +327,7 @@ PJ *PROJECTION(aeqd) {
         P->inv = aeqd_s_inverse;
         P->fwd = aeqd_s_forward;
     } else {
-        if (!(Q->en = pj_enfn(P->es)))
+        if (!(Q->en = pj_enfn(P->n)))
             return pj_default_destructor (P, 0);
         if (pj_param(P->ctx, P->params, "bguam").i) {
             Q->M1 = pj_mlfn(P->phi0, Q->sinph0, Q->cosph0, Q->en);
@@ -328,5 +356,3 @@ PJ *PROJECTION(aeqd) {
 
     return P;
 }
-
-

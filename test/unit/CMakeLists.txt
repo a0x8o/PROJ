@@ -1,11 +1,27 @@
 # CMake configuration for PROJ unit tests
 
-option(USE_EXTERNAL_GTEST "Compile against external GTest" OFF)
+find_package(GTest 1.8.1)
+if(GTest_FOUND)
+  option(USE_EXTERNAL_GTEST "Compile against external GTest" ON)
+else()
+  option(USE_EXTERNAL_GTEST "Compile against external GTest" OFF)
+endif()
 
 if(USE_EXTERNAL_GTEST)
 
+if(NOT GTest_FOUND)
+    message(FATAL_ERROR "External GTest >= 1.8.1 not found")
+endif()
 message(STATUS "Using external GTest")
-find_package(GTest 1.8.1 CONFIG REQUIRED)
+
+# CMake < 3.20.0 uses GTest::GTest
+# CMake >= 3.20 uses GTest::gtest, and deprecates GTest::GTest
+# so for older CMake, create an alias from GTest::GTest to GTest::gtest
+if(NOT TARGET GTest::gtest)
+    add_library(GTest::gtest INTERFACE IMPORTED)
+    set_target_properties(GTest::gtest PROPERTIES
+                          INTERFACE_LINK_LIBRARIES "GTest::GTest")
+endif()
 
 else()
 
@@ -61,7 +77,7 @@ add_compile_options(${PROJ_CXX_WARN_FLAGS})
 
 set(PROJ_TEST_ENVIRONMENT
   "PROJ_SKIP_READ_USER_WRITABLE_DIRECTORY=YES"
-  "PROJ_LIB=${PROJ_BINARY_DIR}/data/for_tests"
+  "PROJ_DATA=${PROJ_BINARY_DIR}/data/for_tests"
   "PROJ_SOURCE_DATA=${PROJ_SOURCE_DIR}/data"
 )
 
@@ -144,9 +160,15 @@ add_executable(test_network
   main.cpp
   test_network.cpp)
 if(CURL_ENABLED)
-  include_directories(${CURL_INCLUDE_DIR})
   target_compile_definitions(test_network PRIVATE -DCURL_ENABLED)
-  target_link_libraries(test_network PRIVATE ${CURL_LIBRARY})
+  if( CMAKE_VERSION VERSION_LESS 3.11 AND CMAKE_CROSSCOMPILING )
+      # Hack needed for ubuntu:18.04 mingw64 cross compiling to avoid
+      # -isystem to be emitted (similar to https://discourse.cmake.org/t/use-of-isystem/1574)
+      target_include_directories(test_network PRIVATE ${CURL_INCLUDE_DIRS})
+      target_link_libraries(test_network PRIVATE ${CURL_LIBRARIES})
+  else()
+      target_link_libraries(test_network PRIVATE CURL::libcurl)
+  endif()
 endif()
 target_link_libraries(test_network
   PRIVATE GTest::gtest
@@ -186,8 +208,8 @@ add_test(NAME test_misc COMMAND test_misc)
 set_property(TEST test_misc
   PROPERTY ENVIRONMENT ${PROJ_TEST_ENVIRONMENT})
 
-if (USE_THREAD AND Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
-add_definitions(-DMUTEX_pthread)
+if (Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
+add_definitions(-DPROJ_HAS_PTHREADS)
 add_executable(test_fork
   test_fork.c)
 target_link_libraries(test_fork

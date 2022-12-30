@@ -1,4 +1,4 @@
-#define PJ_LIB__
+#define PJ_LIB_
 #include <errno.h>
 #include "proj.h"
 #include "proj_internal.h"
@@ -83,7 +83,7 @@ static PJ_LP bonne_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, invers
 
     xy.y = Q->am1 - xy.y;
     rh = hypot(xy.x, xy.y);
-    lp.phi = pj_inv_mlfn(P->ctx, Q->am1 + Q->m1 - rh, P->es, Q->en);
+    lp.phi = pj_inv_mlfn(Q->am1 + Q->m1 - rh, Q->en);
     if ((s = fabs(lp.phi)) < M_HALFPI) {
         s = sin(lp.phi);
         lp.lam = rh * atan2(xy.x, xy.y) *
@@ -127,7 +127,7 @@ PJ *PROJECTION(bonne) {
     }
 
     if (P->es != 0.0) {
-        Q->en = pj_enfn(P->es);
+        Q->en = pj_enfn(P->n);
         if (nullptr==Q->en)
             return destructor(P, PROJ_ERR_OTHER /*ENOMEM*/);
         Q->am1 = sin(Q->phi1);

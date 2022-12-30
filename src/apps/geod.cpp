@@ -30,8 +30,8 @@ printLL(double p, double l) {
 		(void)printf(oform, p * RAD_TO_DEG); TAB;
 		(void)printf(oform, l * RAD_TO_DEG);
 	} else {
-		(void)fputs(rtodms(pline, p, 'N', 'S'),stdout); TAB;
-		(void)fputs(rtodms(pline, l, 'E', 'W'),stdout);
+		(void)fputs(rtodms(pline, sizeof(pline), p, 'N', 'S'),stdout); TAB;
+		(void)fputs(rtodms(pline, sizeof(pline), l, 'E', 'W'),stdout);
 	}
 }
 	static void
@@ -102,8 +102,8 @@ process(FILE *fid) {
 				(void)printf(oform, al21 * RAD_TO_DEG); TAB;
 				(void)printf(osform, geod_S * fr_meter);
 			}  else {
-				(void)fputs(rtodms(pline, al12, 0, 0), stdout); TAB;
-				(void)fputs(rtodms(pline, al21, 0, 0), stdout); TAB;
+				(void)fputs(rtodms(pline, sizeof(pline), al12, 0, 0), stdout); TAB;
+				(void)fputs(rtodms(pline, sizeof(pline), al21, 0, 0), stdout); TAB;
 				(void)printf(osform, geod_S * fr_meter);
 			}
 		} else if (inverse)
@@ -112,8 +112,8 @@ process(FILE *fid) {
 				(void)printf(oform, al21 * RAD_TO_DEG); TAB;
 				(void)printf(osform, geod_S * fr_meter);
 			} else {
-				(void)fputs(rtodms(pline, al12, 0, 0), stdout); TAB;
-				(void)fputs(rtodms(pline, al21, 0, 0), stdout); TAB;
+				(void)fputs(rtodms(pline, sizeof(pline), al12, 0, 0), stdout); TAB;
+				(void)fputs(rtodms(pline, sizeof(pline), al21, 0, 0), stdout); TAB;
 				(void)printf(osform, geod_S * fr_meter);
 			}
 		else {
@@ -121,7 +121,7 @@ process(FILE *fid) {
 			if (oform)
 				(void)printf(oform, al21 * RAD_TO_DEG);
 			else
-				(void)fputs(rtodms(pline, al21, 0, 0), stdout);
+				(void)fputs(rtodms(pline, sizeof(pline), al21, 0, 0), stdout);
 		}
 		(void)fputs(s, stdout);
                 fflush(stdout);
@@ -135,6 +135,10 @@ int main(int argc, char **argv) {
 	char *arg, **eargv = argv;
 	FILE *fid;
 	static int eargc = 0, c;
+
+	if( argc == 0 ) {
+		exit(1);
+	}
 
 	if ((emess_dat.Prog_name = strrchr(*argv,'/')) != nullptr) ++emess_dat.Prog_name;
 	else emess_dat.Prog_name = *argv;

@@ -1,17 +1,17 @@
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
+#include <mutex>
 #include <stddef.h>
 #include <string.h>
 #include <time.h>
 
 #include "proj_internal.h"
-#include "proj/internal/mutex.hpp"
 #include "grids.hpp"
 
 PROJ_HEAD(vgridshift, "Vertical grid shift");
 
-static NS_PROJ::mutex gMutex{};
+static std::mutex gMutex{};
 static std::set<std::string> gKnownGrids{};
 
 using namespace NS_PROJ;
@@ -101,39 +101,32 @@ static PJ_LPZ reverse_3d(PJ_XYZ xyz, PJ *P) {
 }
 
 
-static PJ_COORD forward_4d(PJ_COORD obs, PJ *P) {
+static void forward_4d(PJ_COORD& coo, PJ *P) {
     struct vgridshiftData *Q = (struct vgridshiftData *) P->opaque;
-    PJ_COORD point = obs;
 
     /* If transformation is not time restricted, we always call it */
     if (Q->t_final==0 || Q->t_epoch==0) {
-        point.xyz = forward_3d (obs.lpz, P);
-        return point;
+        coo.xyz = forward_3d (coo.lpz, P);
+        return;
     }
 
     /* Time restricted - only apply transform if within time bracket */
-    if (obs.lpzt.t < Q->t_epoch && Q->t_final > Q->t_epoch)
-        point.xyz = forward_3d (obs.lpz, P);
-
-
-    return point;
+    if (coo.lpzt.t < Q->t_epoch && Q->t_final > Q->t_epoch)
+        coo.xyz = forward_3d (coo.lpz, P);
 }
 
-static PJ_COORD reverse_4d(PJ_COORD obs, PJ *P) {
+static void reverse_4d(PJ_COORD& coo, PJ *P) {
     struct vgridshiftData *Q = (struct vgridshiftData *) P->opaque;
-    PJ_COORD point = obs;
 
     /* If transformation is not time restricted, we always call it */
     if (Q->t_final==0 || Q->t_epoch==0) {
-        point.lpz = reverse_3d (obs.xyz, P);
-        return point;
+        coo.lpz = reverse_3d (coo.xyz, P);
+        return;
     }
 
     /* Time restricted - only apply transform if within time bracket */
-    if (obs.lpzt.t < Q->t_epoch && Q->t_final > Q->t_epoch)
-        point.lpz = reverse_3d (obs.xyz, P);
-
-    return point;
+    if (coo.lpzt.t < Q->t_epoch && Q->t_final > Q->t_epoch)
+        coo.lpz = reverse_3d (coo.xyz, P);
 }
 
 static PJ *destructor (PJ *P, int errlev) {
@@ -234,6 +227,6 @@ PJ *TRANSFORMATION(vgridshift,0) {
 }
 
 void pj_clear_vgridshift_knowngrids_cache() {
-    NS_PROJ::lock_guard<NS_PROJ::mutex> lock(gMutex);
+    std::lock_guard<std::mutex> lock(gMutex);
     gKnownGrids.clear();
 }

@@ -1,4 +1,4 @@
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -38,7 +38,7 @@ static PJ_LP gn_sinu_e_inverse (PJ_XY xy, PJ *P) {          /* Ellipsoidal, inve
     PJ_LP lp = {0.0,0.0};
     double s;
 
-    lp.phi = pj_inv_mlfn(P->ctx, xy.y, P->es, static_cast<struct pj_opaque*>(P->opaque)->en);
+    lp.phi = pj_inv_mlfn(xy.y, static_cast<struct pj_opaque*>(P->opaque)->en);
     s = fabs(lp.phi);
     if (s < M_HALFPI) {
         s = sin(lp.phi);
@@ -127,7 +127,7 @@ PJ *PROJECTION(sinu) {
     P->opaque = Q;
     P->destructor = destructor;
 
-    if (!(Q->en = pj_enfn(P->es)))
+    if (!(Q->en = pj_enfn(P->n)))
         return pj_default_destructor (P, PROJ_ERR_OTHER /*ENOMEM*/);
 
     if (P->es != 0.0) {

@@ -123,6 +123,7 @@ ogc
 omerc
 OSGeo
 osgeo
+som
 srs
 tmerc
 towgs
@@ -178,6 +179,7 @@ horner
 Hotine
 Karney
 Kavraisky
+Kavrayskiy
 Krovak
 krovak
 Krüger

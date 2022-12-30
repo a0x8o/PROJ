@@ -1388,12 +1388,6 @@ void GeodeticReferenceFrame::_exportToJSON(
     if (dynamicGRF) {
         writer->AddObjKey("frame_reference_epoch");
         writer->Add(dynamicGRF->frameReferenceEpoch().value());
-
-        const auto &deformationModel = dynamicGRF->deformationModelName();
-        if (deformationModel.has_value()) {
-            writer->AddObjKey("deformation_model");
-            writer->Add(*deformationModel);
-        }
     }
 
     writer->AddObjKey("ellipsoid");
@@ -1414,7 +1408,8 @@ void GeodeticReferenceFrame::_exportToJSON(
 // ---------------------------------------------------------------------------
 
 //! @cond Doxygen_Suppress
-bool GeodeticReferenceFrame::_isEquivalentTo(
+
+bool GeodeticReferenceFrame::isEquivalentToNoExactTypeCheck(
     const util::IComparable *other, util::IComparable::Criterion criterion,
     const io::DatabaseContextPtr &dbContext) const {
     auto otherGRF = dynamic_cast<const GeodeticReferenceFrame *>(other);
@@ -1427,6 +1422,19 @@ bool GeodeticReferenceFrame::_isEquivalentTo(
            ellipsoid()->_isEquivalentTo(otherGRF->ellipsoid().get(), criterion,
                                         dbContext);
 }
+
+// ---------------------------------------------------------------------------
+
+bool GeodeticReferenceFrame::_isEquivalentTo(
+    const util::IComparable *other, util::IComparable::Criterion criterion,
+    const io::DatabaseContextPtr &dbContext) const {
+    if (criterion == Criterion::STRICT &&
+        !util::isOfExactType<GeodeticReferenceFrame>(*other)) {
+        return false;
+    }
+    return isEquivalentToNoExactTypeCheck(other, criterion, dbContext);
+}
+
 //! @endcond
 
 // ---------------------------------------------------------------------------
@@ -1558,10 +1566,19 @@ DynamicGeodeticReferenceFrame::deformationModelName() const {
 bool DynamicGeodeticReferenceFrame::_isEquivalentTo(
     const util::IComparable *other, util::IComparable::Criterion criterion,
     const io::DatabaseContextPtr &dbContext) const {
-    auto otherDGRF = dynamic_cast<const DynamicGeodeticReferenceFrame *>(other);
-    if (otherDGRF == nullptr ||
-        !GeodeticReferenceFrame::_isEquivalentTo(other, criterion, dbContext)) {
+    if (criterion == Criterion::STRICT &&
+        !util::isOfExactType<DynamicGeodeticReferenceFrame>(*other)) {
         return false;
+    }
+    if (!GeodeticReferenceFrame::isEquivalentToNoExactTypeCheck(
+            other, criterion, dbContext)) {
+        return false;
+    }
+    auto otherDGRF = dynamic_cast<const DynamicGeodeticReferenceFrame *>(other);
+    if (otherDGRF == nullptr) {
+        // we can go here only if criterion != Criterion::STRICT, and thus
+        // given the above check we can consider the objects equivalent.
+        return true;
     }
     return frameReferenceEpoch()._isEquivalentTo(
                otherDGRF->frameReferenceEpoch(), criterion) &&
@@ -2086,12 +2103,6 @@ void VerticalReferenceFrame::_exportToJSON(
     if (dynamicGRF) {
         writer->AddObjKey("frame_reference_epoch");
         writer->Add(dynamicGRF->frameReferenceEpoch().value());
-
-        const auto &deformationModel = dynamicGRF->deformationModelName();
-        if (deformationModel.has_value()) {
-            writer->AddObjKey("deformation_model");
-            writer->Add(*deformationModel);
-        }
     }
 
     ObjectUsage::baseExportToJSON(formatter);
@@ -2101,7 +2112,7 @@ void VerticalReferenceFrame::_exportToJSON(
 // ---------------------------------------------------------------------------
 
 //! @cond Doxygen_Suppress
-bool VerticalReferenceFrame::_isEquivalentTo(
+bool VerticalReferenceFrame::isEquivalentToNoExactTypeCheck(
     const util::IComparable *other, util::IComparable::Criterion criterion,
     const io::DatabaseContextPtr &dbContext) const {
     auto otherVRF = dynamic_cast<const VerticalReferenceFrame *>(other);
@@ -2121,6 +2132,19 @@ bool VerticalReferenceFrame::_isEquivalentTo(
     }
     return true;
 }
+
+// ---------------------------------------------------------------------------
+
+bool VerticalReferenceFrame::_isEquivalentTo(
+    const util::IComparable *other, util::IComparable::Criterion criterion,
+    const io::DatabaseContextPtr &dbContext) const {
+    if (criterion == Criterion::STRICT &&
+        !util::isOfExactType<VerticalReferenceFrame>(*other)) {
+        return false;
+    }
+    return isEquivalentToNoExactTypeCheck(other, criterion, dbContext);
+}
+
 //! @endcond
 
 // ---------------------------------------------------------------------------
@@ -2195,10 +2219,19 @@ DynamicVerticalReferenceFrame::deformationModelName() const {
 bool DynamicVerticalReferenceFrame::_isEquivalentTo(
     const util::IComparable *other, util::IComparable::Criterion criterion,
     const io::DatabaseContextPtr &dbContext) const {
-    auto otherDGRF = dynamic_cast<const DynamicVerticalReferenceFrame *>(other);
-    if (otherDGRF == nullptr ||
-        !VerticalReferenceFrame::_isEquivalentTo(other, criterion, dbContext)) {
+    if (criterion == Criterion::STRICT &&
+        !util::isOfExactType<DynamicVerticalReferenceFrame>(*other)) {
         return false;
+    }
+    if (!VerticalReferenceFrame::isEquivalentToNoExactTypeCheck(
+            other, criterion, dbContext)) {
+        return false;
+    }
+    auto otherDGRF = dynamic_cast<const DynamicVerticalReferenceFrame *>(other);
+    if (otherDGRF == nullptr) {
+        // we can go here only if criterion != Criterion::STRICT, and thus
+        // given the above check we can consider the objects equivalent.
+        return true;
     }
     return frameReferenceEpoch()._isEquivalentTo(
                otherDGRF->frameReferenceEpoch(), criterion) &&

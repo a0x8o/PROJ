@@ -4,27 +4,13 @@ message(STATUS "Configuring proj library:")
 ### SWITCH BETWEEN STATIC OR SHARED LIBRARY###
 ##############################################
 
-# default config is shared, except static on Windows
-set(BUILD_SHARED_LIBS_DEFAULT ON)
-if(WIN32)
-  set(BUILD_SHARED_LIBS_DEFAULT OFF)
-endif()
+# default config is shared
 option(BUILD_SHARED_LIBS
-  "Build PROJ library shared." ${BUILD_SHARED_LIBS_DEFAULT})
+  "Build PROJ library shared." ON)
 
-option(USE_THREAD "Build libproj with thread/mutex support " ON)
-if(NOT USE_THREAD)
-  add_definitions(-DMUTEX_stub)
-endif()
 find_package(Threads QUIET)
-if(USE_THREAD AND Threads_FOUND AND CMAKE_USE_WIN32_THREADS_INIT)
-  add_definitions(-DMUTEX_win32)
-elseif(USE_THREAD AND Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
-  add_definitions(-DMUTEX_pthread)
-elseif(USE_THREAD AND NOT Threads_FOUND)
-  message(FATAL_ERROR
-    "No thread library found and thread/mutex support is "
-    "required by USE_THREAD option")
+if(Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
+  add_definitions(-DPROJ_HAS_PTHREADS)
 endif()
 
 option(ENABLE_IPO
@@ -71,8 +57,7 @@ set(SRC_LIBPROJ_PROJECTIONS
   projections/eqc.cpp
   projections/gall.cpp
   projections/labrd.cpp
-  projections/lsat.cpp
-  projections/misrsom.cpp
+  projections/som.cpp
   projections/merc.cpp
   projections/mill.cpp
   projections/ocea.cpp
@@ -122,6 +107,8 @@ set(SRC_LIBPROJ_PROJECTIONS
   projections/goode.cpp
   projections/igh.cpp
   projections/igh_o.cpp
+  projections/imoll.cpp
+  projections/imoll_o.cpp
   projections/hatano.cpp
   projections/loxim.cpp
   projections/mbt_fps.cpp
@@ -169,6 +156,7 @@ set(SRC_LIBPROJ_CONVERSIONS
 set(SRC_LIBPROJ_TRANSFORMATIONS
   transformations/affine.cpp
   transformations/deformation.cpp
+  transformations/gridshift.cpp
   transformations/helmert.cpp
   transformations/hgridshift.cpp
   transformations/horner.cpp
@@ -177,6 +165,7 @@ set(SRC_LIBPROJ_TRANSFORMATIONS
   transformations/xyzgridshift.cpp
   transformations/defmodel.cpp
   transformations/tinshift.cpp
+  transformations/vertoffset.cpp
 )
 
 set(SRC_LIBPROJ_ISO19111
@@ -295,8 +284,8 @@ include_directories(${PROJ_SOURCE_DIR}/include)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 source_group("CMake Files" FILES CMakeLists.txt)
 
-# Embed PROJ_LIB data files location
-add_definitions(-DPROJ_LIB="${CMAKE_INSTALL_PREFIX}/${DATADIR}")
+# Embed PROJ_DATA data files location
+add_definitions(-DPROJ_DATA="${PROJ_DATA_PATH}")
 
 
 ###########################################################
@@ -315,7 +304,7 @@ add_custom_target(check_wkt1_grammar_md5 ALL
                   COMMAND ${CMAKE_COMMAND}
                       "-DIN_FILE=wkt1_grammar.y"
                       "-DTARGET=generate_wkt1_parser"
-                      "-DEXPECTED_MD5SUM=3a1720c3fa1b759719e33dd558603efb"
+                      "-DEXPECTED_MD5SUM=04ba1095339aeac27105f5782d6297de"
                       -P "${CMAKE_CURRENT_SOURCE_DIR}/check_md5sum.cmake"
                   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
                   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/wkt1_grammar.y"
@@ -337,7 +326,7 @@ add_custom_target(check_wkt2_grammar_md5 ALL
                   COMMAND ${CMAKE_COMMAND}
                       "-DIN_FILE=wkt2_grammar.y"
                       "-DTARGET=generate_wkt2_parser"
-                      "-DEXPECTED_MD5SUM=1691b7d213073d5a1b49db2e080bc96e"
+                      "-DEXPECTED_MD5SUM=f9ee543089ae55a895ae6e16cd0a68b2"
                       -P "${CMAKE_CURRENT_SOURCE_DIR}/check_md5sum.cmake"
                   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
                   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/wkt2_grammar.y"
@@ -374,11 +363,6 @@ add_library(proj
 )
 add_library(PROJ::proj ALIAS proj)
 
-target_compile_options(proj
-  PRIVATE $<$<COMPILE_LANGUAGE:C>:${PROJ_C_WARN_FLAGS}>
-  PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${PROJ_CXX_WARN_FLAGS}>
-)
-
 if(MSVC OR MINGW)
     target_compile_definitions(proj PRIVATE -DNOMINMAX)
 endif()
@@ -406,26 +390,26 @@ endif()
 target_include_directories(proj INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${PROJ_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${INCLUDEDIR}>)
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 if(WIN32)
   set_target_properties(proj
     PROPERTIES
-    VERSION "${${PROJECT_NAME}_BUILD_VERSION}"
+    VERSION "${PROJ_VERSION}"
     OUTPUT_NAME "${PROJ_CORE_TARGET_OUTPUT_NAME}"
     ARCHIVE_OUTPUT_NAME proj
     CLEAN_DIRECT_OUTPUT 1)
 elseif(BUILD_FRAMEWORKS_AND_BUNDLE)
   set_target_properties(proj
     PROPERTIES
-    VERSION "${${PROJECT_NAME}_BUILD_VERSION}"
+    VERSION "${PROJ_VERSION}"
     INSTALL_NAME_DIR ${PROJ_INSTALL_NAME_DIR}
     CLEAN_DIRECT_OUTPUT 1)
 else()
   set_target_properties(proj
     PROPERTIES
-    VERSION "${${PROJECT_NAME}_BUILD_VERSION}"
-    SOVERSION "${${PROJECT_NAME}_API_VERSION}"
+    VERSION "${PROJ_BUILD_VERSION}"
+    SOVERSION "${PROJ_SOVERSION}"
     CLEAN_DIRECT_OUTPUT 1)
 endif()
 
@@ -449,7 +433,7 @@ if(UNIX)
     target_link_libraries(proj PRIVATE -ldl)
   endif()
 endif()
-if(USE_THREAD AND Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
+if(Threads_FOUND AND CMAKE_USE_PTHREADS_INIT)
   target_link_libraries(proj PRIVATE ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
@@ -464,16 +448,28 @@ endif()
 
 if(TIFF_ENABLED)
   target_compile_definitions(proj PRIVATE -DTIFF_ENABLED)
-  target_include_directories(proj PRIVATE ${TIFF_INCLUDE_DIR})
-  target_link_libraries(proj PRIVATE ${TIFF_LIBRARY})
+  if( CMAKE_VERSION VERSION_LESS 3.11 AND CMAKE_CROSSCOMPILING )
+      # Hack needed for ubuntu:18.04 mingw64 cross compiling to avoid
+      # -isystem to be emitted (similar to https://discourse.cmake.org/t/use-of-isystem/1574)
+      target_include_directories(proj PRIVATE ${TIFF_INCLUDE_DIRS})
+      target_link_libraries(proj PRIVATE ${TIFF_LIBRARIES})
+  else()
+      target_link_libraries(proj PRIVATE TIFF::TIFF)
+  endif()
 endif()
 
 if(CURL_ENABLED)
   target_compile_definitions(proj PRIVATE -DCURL_ENABLED)
-  target_include_directories(proj PRIVATE ${CURL_INCLUDE_DIR})
+  if( CMAKE_VERSION VERSION_LESS 3.11 AND CMAKE_CROSSCOMPILING )
+      # Hack needed for ubuntu:18.04 mingw64 cross compiling to avoid
+      # -isystem to be emitted (similar to https://discourse.cmake.org/t/use-of-isystem/1574)
+      target_include_directories(proj PRIVATE ${CURL_INCLUDE_DIRS})
+      target_link_libraries(proj PRIVATE ${CURL_LIBRARIES})
+  else()
+      target_link_libraries(proj PRIVATE CURL::libcurl)
+  endif()
   target_link_libraries(proj
     PRIVATE
-      ${CURL_LIBRARY}
       $<$<CXX_COMPILER_ID:MSVC>:ws2_32>
       $<$<CXX_COMPILER_ID:MSVC>:wldap32>
       $<$<CXX_COMPILER_ID:MSVC>:advapi32>
@@ -494,14 +490,14 @@ endif()
 ##############################################
 install(TARGETS proj
   EXPORT targets
-  RUNTIME DESTINATION ${BINDIR}
-  LIBRARY DESTINATION ${LIBDIR}
-  ARCHIVE DESTINATION ${LIBDIR}
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
   FRAMEWORK DESTINATION ${FRAMEWORKDIR})
 
 if(NOT BUILD_FRAMEWORKS_AND_BUNDLE)
   install(FILES ${ALL_LIBPROJ_HEADERS}
-    DESTINATION ${INCLUDEDIR})
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endif()
 
 ##############################################

@@ -42,12 +42,12 @@
 #include "proj/internal/internal.hpp"
 #include "proj/internal/io_internal.hpp"
 #include "proj/internal/lru_cache.hpp"
-#include "proj/internal/mutex.hpp"
 #include "proj/internal/tracing.hpp"
 
 #include "operation/coordinateoperation_internal.hpp"
 #include "operation/parammappings.hpp"
 
+#include "filemanager.hpp"
 #include "sqlite3_utils.hpp"
 
 #include <algorithm>
@@ -60,6 +60,7 @@
 #include <locale>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream> // std::ostringstream
 #include <stdexcept>
 #include <string>
@@ -78,8 +79,8 @@
 // parallel. This is slightly faster
 #define ENABLE_CUSTOM_LOCKLESS_VFS
 
-#if defined(_WIN32) && defined(MUTEX_pthread)
-#undef MUTEX_pthread
+#if defined(_WIN32) && defined(PROJ_HAS_PTHREADS)
+#undef PROJ_HAS_PTHREADS
 #endif
 
 /* SQLite3 might use seak()+read() or pread[64]() to read data */
@@ -87,7 +88,7 @@
 /* children of a parent process, while the former doesn't. */
 /* So we use pthread_atfork() to set a flag in forked children, to ask them */
 /* to close and reopen their database handle. */
-#if defined(MUTEX_pthread) && !defined(SQLITE_USE_PREAD)
+#if defined(PROJ_HAS_PTHREADS) && !defined(SQLITE_USE_PREAD)
 #include <pthread.h>
 #define REOPEN_SQLITE_DB_AFTER_FORK
 #endif
@@ -252,7 +253,7 @@ class SQLiteHandle {
     }
 
     // cppcheck-suppress functionStatic
-    void registerFunctions();
+    void initialize();
 
     SQLResultSet run(const std::string &sql,
                      const ListOfParams &parameters = ListOfParams(),
@@ -344,7 +345,7 @@ std::shared_ptr<SQLiteHandle> SQLiteHandle::open(PJ_CONTEXT *ctx,
 #ifdef ENABLE_CUSTOM_LOCKLESS_VFS
     handle->vfs_ = std::move(vfs);
 #endif
-    handle->registerFunctions();
+    handle->initialize();
     handle->checkDatabaseLayout(path, path, std::string());
     return handle;
 }
@@ -359,7 +360,7 @@ SQLiteHandle::initFromExisting(sqlite3 *sqlite_handle, bool close_handle,
         new SQLiteHandle(sqlite_handle, close_handle));
     handle->nLayoutVersionMajor_ = nLayoutVersionMajor;
     handle->nLayoutVersionMinor_ = nLayoutVersionMinor;
-    handle->registerFunctions();
+    handle->initialize();
     return handle;
 }
 
@@ -370,7 +371,7 @@ SQLiteHandle::initFromExistingUniquePtr(sqlite3 *sqlite_handle,
                                         bool close_handle) {
     auto handle = std::unique_ptr<SQLiteHandle>(
         new SQLiteHandle(sqlite_handle, close_handle));
-    handle->registerFunctions();
+    handle->initialize();
     return handle;
 }
 
@@ -381,7 +382,7 @@ SQLResultSet SQLiteHandle::run(sqlite3_stmt *stmt, const std::string &sql,
                                bool useMaxFloatPrecision) {
     int nBindField = 1;
     for (const auto &param : parameters) {
-        const auto paramType = param.type();
+        const auto &paramType = param.type();
         if (paramType == SQLValues::Type::STRING) {
             auto strValue = param.stringValue();
             sqlite3_bind_text(stmt, nBindField, strValue.c_str(),
@@ -547,7 +548,18 @@ void SQLiteHandle::checkDatabaseLayout(const std::string &mainDbPath,
 #define SQLITE_DETERMINISTIC 0
 #endif
 
-void SQLiteHandle::registerFunctions() {
+void SQLiteHandle::initialize() {
+
+    // There is a bug in sqlite 3.38.0 with some complex queries.
+    // Cf https://github.com/OSGeo/PROJ/issues/3077
+    // Disabling Bloom-filter pull-down optimization as suggested in
+    // https://sqlite.org/forum/forumpost/7d3a75438c
+    const int sqlite3VersionNumber = sqlite3_libversion_number();
+    if (sqlite3VersionNumber == 3 * 1000000 + 38 * 1000) {
+        sqlite3_test_control(SQLITE_TESTCTRL_OPTIMIZATIONS, sqlite_handle_,
+                             0x100000);
+    }
+
     sqlite3_create_function(sqlite_handle_, "pseudo_area_from_swne", 4,
                             SQLITE_UTF8 | SQLITE_DETERMINISTIC, nullptr,
                             PROJ_SQLITE_pseudo_area_from_swne, nullptr,
@@ -565,7 +577,7 @@ class SQLiteHandleCache {
     bool firstTime_ = true;
 #endif
 
-    NS_PROJ::mutex sMutex_{};
+    std::mutex sMutex_{};
 
     // Map dbname to SQLiteHandle
     lru11::Cache<std::string, std::shared_ptr<SQLiteHandle>> cache_{};
@@ -594,7 +606,7 @@ SQLiteHandleCache &SQLiteHandleCache::get() {
 // ---------------------------------------------------------------------------
 
 void SQLiteHandleCache::clear() {
-    NS_PROJ::lock_guard<NS_PROJ::mutex> lock(sMutex_);
+    std::lock_guard<std::mutex> lock(sMutex_);
     cache_.clear();
 }
 
@@ -602,7 +614,7 @@ void SQLiteHandleCache::clear() {
 
 std::shared_ptr<SQLiteHandle>
 SQLiteHandleCache::getHandle(const std::string &path, PJ_CONTEXT *ctx) {
-    NS_PROJ::lock_guard<NS_PROJ::mutex> lock(sMutex_);
+    std::lock_guard<std::mutex> lock(sMutex_);
 
 #ifdef REOPEN_SQLITE_DB_AFTER_FORK
     if (firstTime_) {
@@ -625,7 +637,7 @@ SQLiteHandleCache::getHandle(const std::string &path, PJ_CONTEXT *ctx) {
 // ---------------------------------------------------------------------------
 
 void SQLiteHandleCache::invalidateHandles() {
-    NS_PROJ::lock_guard<NS_PROJ::mutex> lock(sMutex_);
+    std::lock_guard<std::mutex> lock(sMutex_);
     const auto lambda =
         [](const lru11::KeyValuePair<std::string, std::shared_ptr<SQLiteHandle>>
                &kvp) { kvp.value->invalidate(); };
@@ -3231,8 +3243,16 @@ bool DatabaseContext::lookForGridInfo(
     std::string &fullFilename, std::string &packageName, std::string &url,
     bool &directDownload, bool &openLicense, bool &gridAvailable) const {
     Private::GridInfoCache info;
-    const std::string key(projFilename +
-                          (considerKnownGridsAsAvailable ? "true" : "false"));
+
+    auto ctxt = d->pjCtxt();
+    if (ctxt == nullptr) {
+        ctxt = pj_get_default_ctx();
+        d->setPjCtxt(ctxt);
+    }
+
+    std::string key(projFilename);
+    key += proj_context_is_network_enabled(ctxt) ? "true" : "false";
+    key += considerKnownGridsAsAvailable ? "true" : "false";
     if (d->getGridInfoFromCache(key, info)) {
         fullFilename = info.fullFilename;
         packageName = info.packageName;
@@ -3249,20 +3269,13 @@ bool DatabaseContext::lookForGridInfo(
     openLicense = false;
     directDownload = false;
 
-    if (considerKnownGridsAsAvailable) {
-        fullFilename = projFilename;
-    } else {
-        fullFilename.resize(2048);
-        if (d->pjCtxt() == nullptr) {
-            d->setPjCtxt(pj_get_default_ctx());
-        }
-        int errno_before = proj_context_errno(d->pjCtxt());
-        gridAvailable =
-            pj_find_file(d->pjCtxt(), projFilename.c_str(), &fullFilename[0],
-                         fullFilename.size() - 1) != 0;
-        proj_context_errno_set(d->pjCtxt(), errno_before);
-        fullFilename.resize(strlen(fullFilename.c_str()));
-    }
+    fullFilename.resize(2048);
+    int errno_before = proj_context_errno(ctxt);
+    gridAvailable = NS_PROJ::FileManager::open_resource_file(
+                        ctxt, projFilename.c_str(), &fullFilename[0],
+                        fullFilename.size() - 1) != nullptr;
+    proj_context_errno_set(ctxt, errno_before);
+    fullFilename.resize(strlen(fullFilename.c_str()));
 
     auto res =
         d->run("SELECT "
@@ -3272,7 +3285,9 @@ bool DatabaseContext::lookForGridInfo(
                "grid_alternatives.open_license, "
                "grid_packages.open_license AS package_open_license, "
                "grid_alternatives.direct_download, "
-               "grid_packages.direct_download AS package_direct_download "
+               "grid_packages.direct_download AS package_direct_download, "
+               "grid_alternatives.proj_grid_name, "
+               "grid_alternatives.old_proj_grid_name "
                "FROM grid_alternatives "
                "LEFT JOIN grid_packages ON "
                "grid_alternatives.package_name = grid_packages.package_name "
@@ -3286,17 +3301,50 @@ bool DatabaseContext::lookForGridInfo(
         openLicense = (row[3].empty() ? row[4] : row[3]) == "1";
         directDownload = (row[5].empty() ? row[6] : row[5]) == "1";
 
+        const auto &proj_grid_name = row[7];
+        const auto &old_proj_grid_name = row[8];
+        if (proj_grid_name != old_proj_grid_name &&
+            old_proj_grid_name == projFilename) {
+            std::string fullFilenameNewName;
+            fullFilenameNewName.resize(2048);
+            errno_before = proj_context_errno(ctxt);
+            bool gridAvailableWithNewName =
+                pj_find_file(ctxt, proj_grid_name.c_str(),
+                             &fullFilenameNewName[0],
+                             fullFilenameNewName.size() - 1) != 0;
+            proj_context_errno_set(ctxt, errno_before);
+            fullFilenameNewName.resize(strlen(fullFilenameNewName.c_str()));
+            if (gridAvailableWithNewName) {
+                gridAvailable = true;
+                fullFilename = fullFilenameNewName;
+            }
+        }
+
         if (considerKnownGridsAsAvailable &&
             (!packageName.empty() || (!url.empty() && openLicense))) {
             gridAvailable = true;
         }
 
-        info.fullFilename = fullFilename;
         info.packageName = packageName;
-        info.url = url;
+        std::string endpoint(proj_context_get_url_endpoint(d->pjCtxt()));
+        if (!endpoint.empty() && starts_with(url, "https://cdn.proj.org/")) {
+            if (endpoint.back() != '/') {
+                endpoint += '/';
+            }
+            url = endpoint + url.substr(strlen("https://cdn.proj.org/"));
+        }
         info.directDownload = directDownload;
         info.openLicense = openLicense;
+    } else {
+        if (starts_with(fullFilename, "http://") ||
+            starts_with(fullFilename, "https://")) {
+            url = fullFilename;
+            fullFilename.clear();
+        }
     }
+
+    info.fullFilename = fullFilename;
+    info.url = url;
     info.gridAvailable = gridAvailable;
     info.found = ret;
     d->cache(key, info);
@@ -3342,7 +3390,10 @@ std::string DatabaseContext::getOldProjGridName(const std::string &gridName) {
 /** \brief Gets the alias name from an official name.
  *
  * @param officialName Official name. Mandatory
- * @param tableName Table name/category. Mandatory
+ * @param tableName Table name/category. Mandatory.
+ *                  "geographic_2D_crs" and "geographic_3D_crs" are also
+ *                  accepted as special names to add a constraint on the "type"
+ *                  column of the "geodetic_crs" table.
  * @param source Source of the alias. Mandatory
  * @return Alias name (or empty if not found).
  * @throw FactoryException
@@ -3352,29 +3403,38 @@ DatabaseContext::getAliasFromOfficialName(const std::string &officialName,
                                           const std::string &tableName,
                                           const std::string &source) const {
     std::string sql("SELECT auth_name, code FROM \"");
-    sql += replaceAll(tableName, "\"", "\"\"");
+    const auto genuineTableName =
+        tableName == "geographic_2D_crs" || tableName == "geographic_3D_crs"
+            ? "geodetic_crs"
+            : tableName;
+    sql += replaceAll(genuineTableName, "\"", "\"\"");
     sql += "\" WHERE name = ?";
-    if (tableName == "geodetic_crs") {
+    if (tableName == "geodetic_crs" || tableName == "geographic_2D_crs") {
         sql += " AND type = " GEOG_2D_SINGLE_QUOTED;
+    } else if (tableName == "geographic_3D_crs") {
+        sql += " AND type = " GEOG_3D_SINGLE_QUOTED;
     }
+    sql += " ORDER BY deprecated";
     auto res = d->run(sql, {officialName});
     if (res.empty()) {
         res = d->run(
             "SELECT auth_name, code FROM alias_name WHERE table_name = ? AND "
             "alt_name = ? AND source IN ('EPSG', 'PROJ')",
-            {tableName, officialName});
+            {genuineTableName, officialName});
         if (res.size() != 1) {
             return std::string();
         }
     }
-    const auto &row = res.front();
-    res = d->run("SELECT alt_name FROM alias_name WHERE table_name = ? AND "
-                 "auth_name = ? AND code = ? AND source = ?",
-                 {tableName, row[0], row[1], source});
-    if (res.empty()) {
-        return std::string();
+    for (const auto &row : res) {
+        auto res2 =
+            d->run("SELECT alt_name FROM alias_name WHERE table_name = ? AND "
+                   "auth_name = ? AND code = ? AND source = ?",
+                   {genuineTableName, row[0], row[1], source});
+        if (!res2.empty()) {
+            return res2.front()[0];
+        }
     }
-    return res.front()[0];
+    return std::string();
 }
 
 // ---------------------------------------------------------------------------
@@ -3386,7 +3446,10 @@ DatabaseContext::getAliasFromOfficialName(const std::string &officialName,
  * @param authName Authority.
  * @param code Code.
  * @param officialName Official name.
- * @param tableName Table name/category. Mandatory
+ * @param tableName Table name/category. Mandatory.
+ *                  "geographic_2D_crs" and "geographic_3D_crs" are also
+ *                  accepted as special names to add a constraint on the "type"
+ *                  column of the "geodetic_crs" table.
  * @param source Source of the alias. May be empty.
  * @return Aliases
  */
@@ -3403,19 +3466,26 @@ std::list<std::string> DatabaseContext::getAliases(
 
     std::string resolvedAuthName(authName);
     std::string resolvedCode(code);
+    const auto genuineTableName =
+        tableName == "geographic_2D_crs" || tableName == "geographic_3D_crs"
+            ? "geodetic_crs"
+            : tableName;
     if (authName.empty() || code.empty()) {
         std::string sql("SELECT auth_name, code FROM \"");
-        sql += replaceAll(tableName, "\"", "\"\"");
+        sql += replaceAll(genuineTableName, "\"", "\"\"");
         sql += "\" WHERE name = ?";
-        if (tableName == "geodetic_crs") {
+        if (tableName == "geodetic_crs" || tableName == "geographic_2D_crs") {
             sql += " AND type = " GEOG_2D_SINGLE_QUOTED;
+        } else if (tableName == "geographic_3D_crs") {
+            sql += " AND type = " GEOG_3D_SINGLE_QUOTED;
         }
+        sql += " ORDER BY deprecated";
         auto resSql = d->run(sql, {officialName});
         if (resSql.empty()) {
             resSql = d->run("SELECT auth_name, code FROM alias_name WHERE "
                             "table_name = ? AND "
                             "alt_name = ? AND source IN ('EPSG', 'PROJ')",
-                            {tableName, officialName});
+                            {genuineTableName, officialName});
             if (resSql.size() != 1) {
                 d->cacheAliasNames_.insert(key, res);
                 return res;
@@ -3427,7 +3497,7 @@ std::list<std::string> DatabaseContext::getAliases(
     }
     std::string sql("SELECT alt_name FROM alias_name WHERE table_name = ? AND "
                     "auth_name = ? AND code = ?");
-    ListOfParams params{tableName, resolvedAuthName, resolvedCode};
+    ListOfParams params{genuineTableName, resolvedAuthName, resolvedCode};
     if (!source.empty()) {
         sql += " AND source = ?";
         params.emplace_back(source);
@@ -3800,26 +3870,40 @@ util::PropertyMap AuthorityFactory::Private::createPropertiesSearchUsages(
     const std::string &table_name, const std::string &code,
     const std::string &name, bool deprecated) {
 
-    const std::string sql(
-        "SELECT extent.description, extent.south_lat, "
-        "extent.north_lat, extent.west_lon, extent.east_lon, "
-        "scope.scope, "
-        "(CASE WHEN scope.scope LIKE '%large scale%' THEN 0 ELSE 1 END) "
-        "AS score "
-        "FROM usage "
-        "JOIN extent ON usage.extent_auth_name = extent.auth_name AND "
-        "usage.extent_code = extent.code "
-        "JOIN scope ON usage.scope_auth_name = scope.auth_name AND "
-        "usage.scope_code = scope.code "
-        "WHERE object_table_name = ? AND object_auth_name = ? AND "
-        "object_code = ? AND "
-        // We voluntary exclude extent and scope with a specific code
-        "NOT (usage.extent_auth_name = 'PROJ' AND "
-        "usage.extent_code = 'EXTENT_UNKNOWN') AND "
-        "NOT (usage.scope_auth_name = 'PROJ' AND "
-        "usage.scope_code = 'SCOPE_UNKNOWN') "
-        "ORDER BY score, usage.auth_name, usage.code");
-    auto res = run(sql, {table_name, authority(), code});
+    SQLResultSet res;
+    if (table_name == "geodetic_crs" && code == "4326" &&
+        authority() == "EPSG") {
+        // EPSG v10.077 has changed the extent from 1262 to 2830, whose
+        // description is super verbose.
+        // Cf https://epsg.org/closed-change-request/browse/id/2022.086
+        // To avoid churn in our WKT2 output, hot patch to the usage of
+        // 10.076 and earlier
+        res = run("SELECT extent.description, extent.south_lat, "
+                  "extent.north_lat, extent.west_lon, extent.east_lon, "
+                  "scope.scope, 0 AS score FROM extent, scope WHERE "
+                  "extent.code = 1262 and scope.code = 1183");
+    } else {
+        const std::string sql(
+            "SELECT extent.description, extent.south_lat, "
+            "extent.north_lat, extent.west_lon, extent.east_lon, "
+            "scope.scope, "
+            "(CASE WHEN scope.scope LIKE '%large scale%' THEN 0 ELSE 1 END) "
+            "AS score "
+            "FROM usage "
+            "JOIN extent ON usage.extent_auth_name = extent.auth_name AND "
+            "usage.extent_code = extent.code "
+            "JOIN scope ON usage.scope_auth_name = scope.auth_name AND "
+            "usage.scope_code = scope.code "
+            "WHERE object_table_name = ? AND object_auth_name = ? AND "
+            "object_code = ? AND "
+            // We voluntary exclude extent and scope with a specific code
+            "NOT (usage.extent_auth_name = 'PROJ' AND "
+            "usage.extent_code = 'EXTENT_UNKNOWN') AND "
+            "NOT (usage.scope_auth_name = 'PROJ' AND "
+            "usage.scope_code = 'SCOPE_UNKNOWN') "
+            "ORDER BY score, usage.auth_name, usage.code");
+        res = run(sql, {table_name, authority(), code});
+    }
     std::vector<ObjectDomainNNPtr> usages;
     for (const auto &row : res) {
         try {
@@ -3881,8 +3965,38 @@ util::PropertyMap AuthorityFactory::Private::createPropertiesSearchUsages(
 bool AuthorityFactory::Private::rejectOpDueToMissingGrid(
     const operation::CoordinateOperationNNPtr &op,
     bool considerKnownGridsAsAvailable) {
+
+    struct DisableNetwork {
+        const DatabaseContextNNPtr &m_dbContext;
+        bool m_old_network_enabled;
+
+        explicit DisableNetwork(const DatabaseContextNNPtr &l_context)
+            : m_dbContext(l_context) {
+            auto ctxt = m_dbContext->d->pjCtxt();
+            if (ctxt == nullptr) {
+                ctxt = pj_get_default_ctx();
+                m_dbContext->d->setPjCtxt(ctxt);
+            }
+            m_old_network_enabled =
+                proj_context_is_network_enabled(ctxt) != FALSE;
+            if (m_old_network_enabled)
+                proj_context_set_enable_network(ctxt, false);
+        }
+
+        ~DisableNetwork() {
+            if (m_old_network_enabled) {
+                auto ctxt = m_dbContext->d->pjCtxt();
+                proj_context_set_enable_network(ctxt, true);
+            }
+        }
+    };
+
+    auto &l_context = context();
+    // Temporarily disable networking as we are only interested in known grids
+    DisableNetwork disabler(l_context);
+
     for (const auto &gridDesc :
-         op->gridsNeeded(context(), considerKnownGridsAsAvailable)) {
+         op->gridsNeeded(l_context, considerKnownGridsAsAvailable)) {
         if (!gridDesc.available) {
             return true;
         }
@@ -7877,26 +7991,26 @@ AuthorityFactory::getDescriptionText(const std::string &code) const {
 std::list<AuthorityFactory::CRSInfo> AuthorityFactory::getCRSInfoList() const {
 
     const auto getSqlArea = [](const char *table_name) {
-        std::string sql("JOIN usage u ON u.object_table_name = '");
+        std::string sql("LEFT JOIN usage u ON u.object_table_name = '");
         sql += table_name;
         sql += "' AND "
                "u.object_auth_name = c.auth_name AND "
                "u.object_code = c.code "
-               "JOIN extent a "
+               "LEFT JOIN extent a "
                "ON a.auth_name = u.extent_auth_name AND "
                "a.code = u.extent_code ";
         return sql;
     };
 
     const auto getJoinCelestialBody = [](const char *crs_alias) {
-        std::string sql("JOIN geodetic_datum gd ON gd.auth_name = ");
+        std::string sql("LEFT JOIN geodetic_datum gd ON gd.auth_name = ");
         sql += crs_alias;
         sql += ".datum_auth_name AND gd.code = ";
         sql += crs_alias;
         sql += ".datum_code "
-               "JOIN ellipsoid e ON e.auth_name = gd.ellipsoid_auth_name "
+               "LEFT JOIN ellipsoid e ON e.auth_name = gd.ellipsoid_auth_name "
                "AND e.code = gd.ellipsoid_code "
-               "JOIN celestial_body cb ON "
+               "LEFT JOIN celestial_body cb ON "
                "cb.auth_name = e.celestial_body_auth_name "
                "AND cb.code = e.celestial_body_code ";
         return sql;
@@ -7925,7 +8039,7 @@ std::list<AuthorityFactory::CRSInfo> AuthorityFactory::getCRSInfoList() const {
            "LEFT JOIN conversion_method cm ON "
            "conv.method_auth_name = cm.auth_name AND "
            "conv.method_code = cm.code "
-           "JOIN geodetic_crs gcrs ON "
+           "LEFT JOIN geodetic_crs gcrs ON "
            "gcrs.auth_name = c.geodetic_crs_auth_name "
            "AND gcrs.code = c.geodetic_crs_code ";
     sql += getSqlArea("projected_crs");
@@ -7944,7 +8058,7 @@ std::list<AuthorityFactory::CRSInfo> AuthorityFactory::getCRSInfoList() const {
         sql += "WHERE c.auth_name = ? ";
         params.emplace_back(d->authority());
     }
-    // FIXME: we can't handle non-EARTH vertical CRS for now
+    // FIXME: we can't handle non-EARTH compound CRS for now
     sql += "UNION ALL SELECT c.auth_name, c.code, c.name, 'compound', "
            "c.deprecated, "
            "a.west_lon, a.south_lat, a.east_lon, a.north_lat, "
@@ -7969,6 +8083,8 @@ std::list<AuthorityFactory::CRSInfo> AuthorityFactory::getCRSInfoList() const {
             info.type = AuthorityFactory::ObjectType::GEOGRAPHIC_3D_CRS;
         } else if (type == GEOCENTRIC) {
             info.type = AuthorityFactory::ObjectType::GEOCENTRIC_CRS;
+        } else if (type == OTHER) {
+            info.type = AuthorityFactory::ObjectType::GEODETIC_CRS;
         } else if (type == PROJECTED) {
             info.type = AuthorityFactory::ObjectType::PROJECTED_CRS;
         } else if (type == VERTICAL) {
@@ -8797,6 +8913,7 @@ std::list<datum::EllipsoidNNPtr> AuthorityFactory::createEllipsoidFromExisting(
     }
     return res;
 }
+//! @endcond
 
 // ---------------------------------------------------------------------------
 
@@ -9308,7 +9425,6 @@ AuthorityFactory::createCompoundCRSFromExisting(
 
 // ---------------------------------------------------------------------------
 
-//! @cond Doxygen_Suppress
 std::vector<operation::CoordinateOperationNNPtr>
 AuthorityFactory::getTransformationsForGeoid(
     const std::string &geoidName, bool usePROJAlternativeGridNames) const {

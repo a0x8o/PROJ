@@ -40,10 +40,29 @@
 #  ifndef _CRT_NONSTDC_NO_DEPRECATE
 #    define _CRT_NONSTDC_NO_DEPRECATE
 #  endif
-/* enable predefined math constants M_* for MS Visual Studio workaround */
+#endif
+
+/* enable predefined math constants M_* for MS Visual Studio */
+#if defined(_MSC_VER) || defined(_WIN32)
 #  ifndef _USE_MATH_DEFINES
 #     define _USE_MATH_DEFINES
 #  endif
+#endif
+
+// Use "PROJ_FALLTHROUGH;" to annotate deliberate fall-through in switches,
+// use it analogously to "break;".  The trailing semi-colon is required.
+#if !defined(PROJ_FALLTHROUGH) && defined(__has_cpp_attribute)
+#if __cplusplus >= 201703L && __has_cpp_attribute(fallthrough)
+#define PROJ_FALLTHROUGH [[fallthrough]]
+#elif __cplusplus >= 201103L && __has_cpp_attribute(gnu::fallthrough)
+#define PROJ_FALLTHROUGH [[gnu::fallthrough]]
+#elif __cplusplus >= 201103L && __has_cpp_attribute(clang::fallthrough)
+#define PROJ_FALLTHROUGH [[clang::fallthrough]]
+#endif
+#endif
+
+#ifndef PROJ_FALLTHROUGH
+#define PROJ_FALLTHROUGH ((void)0)
 #endif
 
 /* standard inclusions */
@@ -100,14 +119,6 @@
 
 #ifndef ABS
 #  define ABS(x)        ((x<0) ? (-1*(x)) : x)
-#endif
-
-#if INT_MAX == 2147483647
-typedef int pj_int32;
-#elif LONG_MAX == 2147483647
-typedef long pj_int32;
-#else
-#warning It seems no 32-bit integer type is available
 #endif
 
 /* maximum path/filename */
@@ -183,8 +194,8 @@ struct projCppContext;
 /* not sure why we need to export it, but mingw needs it */
 void PROJ_DLL proj_context_delete_cpp_context(struct projCppContext* cppContext);
 
-PJ_COORD pj_fwd4d (PJ_COORD coo, PJ *P);
-PJ_COORD pj_inv4d (PJ_COORD coo, PJ *P);
+bool pj_fwd4d (PJ_COORD& coo, PJ *P);
+bool pj_inv4d (PJ_COORD& coo, PJ *P);
 
 PJ_COORD PROJ_DLL pj_approx_2D_trans (PJ *P, PJ_DIRECTION direction, PJ_COORD coo);
 PJ_COORD PROJ_DLL pj_approx_3D_trans (PJ *P, PJ_DIRECTION direction, PJ_COORD coo);
@@ -236,11 +247,12 @@ struct PJ_REGION_S {
 };
 
 struct PJ_AREA {
-    int     bbox_set;
-    double  west_lon_degree;
-    double  south_lat_degree;
-    double  east_lon_degree;
-    double  north_lat_degree;
+    bool     bbox_set = false;
+    double  west_lon_degree = 0;
+    double  south_lat_degree = 0;
+    double  east_lon_degree = 0;
+    double  north_lat_degree = 0;
+    std::string name{};
 };
 
 
@@ -265,13 +277,13 @@ PJ_DESTRUCTOR:
 
 PJ_OPERATOR:
 
-    A function taking a PJ_COORD and a pointer-to-PJ as args, applying the
-    PJ to the PJ_COORD, and returning the resulting PJ_COORD.
+    A function taking a reference to a PJ_COORD and a pointer-to-PJ as args, applying the
+    PJ to the PJ_COORD, and modifying in-place the passed PJ_COORD.
 
 *****************************************************************************/
 typedef    PJ       *(* PJ_CONSTRUCTOR) (PJ *);
 typedef    PJ       *(* PJ_DESTRUCTOR)  (PJ *, int);
-typedef    PJ_COORD  (* PJ_OPERATOR)    (PJ_COORD, PJ *);
+typedef    void      (* PJ_OPERATOR)    (PJ_COORD&, PJ *);
 /****************************************************************************/
 
 
@@ -565,6 +577,7 @@ struct PJconsts {
     **************************************************************************************/
 
     NS_PROJ::common::IdentifiedObjectPtr iso_obj{};
+    bool                                 iso_obj_is_coordinate_operation = false;
 
     // cached results
     mutable std::string lastWKT{};
@@ -644,7 +657,6 @@ struct projCppContext;
 struct projNetworkCallbacksAndData
 {
     bool enabled = false;
-    bool enabled_env_variable_checked = false; // whereas we have checked PROJ_NETWORK env variable
     proj_network_open_cbk_type open = nullptr;
     proj_network_close_cbk_type close = nullptr;
     proj_network_get_header_value_cbk_type get_header_value = nullptr;
@@ -688,13 +700,11 @@ struct pj_ctx{
     int     use_proj4_init_rules = -1; /* -1 = unknown, 0 = no, 1 = yes */
     bool     forceOver = false; 
     int     epsg_file_exists = -1; /* -1 = unknown, 0 = no, 1 = yes */
-    std::string ca_bundle_path{};
 
-    std::string env_var_proj_lib{}; // content of PROJ_LIB environment variable. Use Filemanager::getProjLibEnvVar() to access
+    std::string env_var_proj_data{}; // content of PROJ_DATA (or legacy PROJ_LIB) environment variable. Use Filemanager::getProjDataEnvVar() to access
     std::vector<std::string> search_paths{};
     const char **c_compat_paths = nullptr; // same, but for projinfo usage
 
-    const char* (*file_finder_legacy) (const char*) = nullptr; // Only for proj_api compat. To remove once it is removed
     const char* (*file_finder) (PJ_CONTEXT *, const char*, void* user_data) = nullptr;
     void* file_finder_user_data = nullptr;
 
@@ -708,6 +718,7 @@ struct pj_ctx{
     bool iniFileLoaded = false;
     std::string endpoint{};
     projNetworkCallbacksAndData networking{};
+    std::string ca_bundle_path{};
     projGridChunkCache gridChunkCache{};
     TMercAlgo defaultTmercAlgo = TMercAlgo::PODER_ENGSAGER; // can be overridden by content of proj.ini
     // END ini file settings
@@ -730,7 +741,7 @@ struct pj_ctx{
 };
 
 /* Generate pj_list external or make list from include file */
-#ifndef PJ_DATUMS__
+#ifndef PJ_DATUMS_
 C_NAMESPACE_VAR struct PJ_DATUMS pj_datums[];
 #endif
 
@@ -738,7 +749,7 @@ C_NAMESPACE_VAR struct PJ_DATUMS pj_datums[];
 
 
 
-#ifdef PJ_LIB__
+#ifdef PJ_LIB_
 #define PROJ_HEAD(name, desc) static const char des_##name [] = desc
 
 #define OPERATION(name, NEED_ELLPS)                          \
@@ -771,13 +782,13 @@ PJ *pj_projection_specific_setup_##name (PJ *P)
 /* In PROJ.4 a projection is a conversion taking angular input and giving scaled linear output */
 #define PROJECTION(name) CONVERSION (name, 1)
 
-#endif /* def PJ_LIB__ */
+#endif /* def PJ_LIB_ */
 
 /* procedure prototypes */
 double PROJ_DLL dmstor(const char *, char **);
 double dmstor_ctx(PJ_CONTEXT *ctx, const char *, char **);
 void   PROJ_DLL set_rtodms(int, int);
-char  PROJ_DLL *rtodms(char *, double, int, int);
+char  PROJ_DLL *rtodms(char *, size_t, double, int, int);
 double PROJ_DLL adjlon(double);
 double aacos(PJ_CONTEXT *,double);
 double aasin(PJ_CONTEXT *,double);
@@ -804,7 +815,7 @@ void     *free_params (PJ_CONTEXT *ctx, paralist *start, int errlev);
 
 double *pj_enfn(double);
 double  pj_mlfn(double, double, double, const double *);
-double  pj_inv_mlfn(PJ_CONTEXT *, double, double, const double *);
+double  pj_inv_mlfn(double, const double *);
 double  pj_qsfn(double, double, double);
 double  pj_tsfn(double, double, double);
 double  pj_msfn(double, double, double);
@@ -870,10 +881,11 @@ const PJ_UNITS *pj_list_angular_units();
 
 void pj_clear_hgridshift_knowngrids_cache();
 void pj_clear_vgridshift_knowngrids_cache();
+void pj_clear_gridshift_knowngrids_cache();
 
 void pj_clear_sqlite_cache();
 
-PJ_LP pj_generic_inverse_2d(PJ_XY xy, PJ *P, PJ_LP lpInitial);
+PJ_LP pj_generic_inverse_2d(PJ_XY xy, PJ *P, PJ_LP lpInitial, double deltaXYTolerance);
 
 
 
@@ -920,7 +932,6 @@ char *pj_strdup(const char *str);
 const char PROJ_DLL *pj_get_release(void);
 void pj_acquire_lock(void);
 void pj_release_lock(void);
-void pj_cleanup_lock(void);
 
 bool pj_log_active( PJ_CONTEXT *ctx, int level );
 void pj_log( PJ_CONTEXT * ctx, int level, const char *fmt, ... );
@@ -929,6 +940,8 @@ void pj_stderr_logger( void *, int, const char * );
 int pj_find_file(PJ_CONTEXT * ctx, const char *short_filename,
                  char* out_full_filename, size_t out_full_filename_size);
 
+// To remove when PROJ_LIB definitely goes away
+void PROJ_DLL pj_stderr_proj_lib_deprecation_warning();
 
 
 #endif /* ndef PROJ_INTERNAL_H */

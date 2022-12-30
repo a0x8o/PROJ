@@ -26,7 +26,7 @@ General Oblique Transformation
    :align: center
    :alt:   General Oblique Transformation
 
-   proj-string: ``+proj=ob_tran +o_proj=mill +o_lon_p=40 +o_lat_p=50 +lon_0=60``
+   proj-string: ``+proj=ob_tran +o_proj=moll +o_lon_p=40 +o_lat_p=50 +lon_0=60``
 
 Usage
 ################################################################################
@@ -92,19 +92,19 @@ Rotate about point
 New "equator" points
 ................................................................................
 
-.. option:: +lon_1=<value>
+.. option:: +o_lon_1=<value>
 
     Longitude of first point.
 
-.. option:: +lat_1=<value>
+.. option:: +o_lat_1=<value>
 
     Latitude of first point.
 
-.. option:: +lon_2=<value>
+.. option:: +o_lon_2=<value>
 
     Longitude of second point.
 
-.. option:: +lat_2=<value>
+.. option:: +o_lat_2=<value>
 
     Latitude of second point.
 

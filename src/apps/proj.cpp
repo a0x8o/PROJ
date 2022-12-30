@@ -20,7 +20,6 @@
 #endif
 
 #define MAX_LINE 1000
-#define MAX_PARGS 100
 #define PJ_INVERSE(P) (P->inv ? 1 : 0)
 
 static PJ *Proj;
@@ -134,13 +133,13 @@ static void process(FILE *fid) {
             (void)fputs(oterr, stdout);
         else if (inverse && !oform) {   /*ascii DMS output */
             if (reverseout) {
-                (void)fputs(rtodms(pline, data.uv.v, 'N', 'S'), stdout);
+                (void)fputs(rtodms(pline, sizeof(pline), data.uv.v, 'N', 'S'), stdout);
                 putchar('\t');
-                (void)fputs(rtodms(pline, data.uv.u, 'E', 'W'), stdout);
+                (void)fputs(rtodms(pline, sizeof(pline), data.uv.u, 'E', 'W'), stdout);
             } else {
-                (void)fputs(rtodms(pline, data.uv.u, 'E', 'W'), stdout);
+                (void)fputs(rtodms(pline, sizeof(pline), data.uv.u, 'E', 'W'), stdout);
                 putchar('\t');
-                (void)fputs(rtodms(pline, data.uv.v, 'N', 'S'), stdout);
+                (void)fputs(rtodms(pline, sizeof(pline), data.uv.v, 'N', 'S'), stdout);
             }
         } else {    /* x-y or decimal degree ascii output, scale if warranted by output units */
             if (inverse) {
@@ -270,10 +269,10 @@ static void vprocess(FILE *fid) {
             (void)fputs(s, stdout);
 
         (void)fputs("Longitude: ", stdout);
-        (void)fputs(proj_rtodms(pline, dat_ll.lam, 'E', 'W'), stdout);
+        (void)fputs(proj_rtodms2(pline, sizeof(pline), dat_ll.lam, 'E', 'W'), stdout);
         (void)printf(" [ %.11g ]\n", dat_ll.lam * RAD_TO_DEG);
         (void)fputs("Latitude:  ", stdout);
-        (void)fputs(proj_rtodms(pline, dat_ll.phi, 'N', 'S'), stdout);
+        (void)fputs(proj_rtodms2(pline, sizeof(pline), dat_ll.phi, 'N', 'S'), stdout);
         (void)printf(" [ %.11g ]\n", dat_ll.phi * RAD_TO_DEG);
         (void)fputs("Easting (x):   ", stdout);
         (void)printf(oform, dat_xy.x); putchar('\n');
@@ -285,7 +284,7 @@ static void vprocess(FILE *fid) {
         (void)printf("Angular distortion (w): %.3f\n", facs.angular_distortion * RAD_TO_DEG);
         (void)printf("Meridian/Parallel angle: %.5f\n", facs.meridian_parallel_angle * RAD_TO_DEG);
         (void)printf("Convergence : ");
-        (void)fputs(proj_rtodms(pline, facs.meridian_convergence, 0, 0), stdout);
+        (void)fputs(proj_rtodms2(pline, sizeof(pline), facs.meridian_convergence, 0, 0), stdout);
         (void)printf(" [ %.8f ]\n", facs.meridian_convergence * RAD_TO_DEG);
         (void)printf("Max-min (Tissot axis a-b) scale error: %.5f %.5f\n\n", facs.tissot_semimajor, facs.tissot_semiminor);
 
@@ -299,6 +298,12 @@ int main(int argc, char **argv) {
     char **eargv = argv;
     FILE *fid;
     int eargc = 0, mon = 0;
+
+    pj_stderr_proj_lib_deprecation_warning();
+
+    if( argc == 0 ) {
+        exit(1);
+    }
 
     if ( (emess_dat.Prog_name = strrchr(*argv,DIR_CHAR)) != nullptr)
         ++emess_dat.Prog_name;
@@ -439,7 +444,7 @@ int main(int argc, char **argv) {
                 continue;
               case 'd':
                 if (--argc <= 0) goto noargument;
-                sprintf(oform_buffer, "%%.%df", atoi(*++argv));
+                snprintf(oform_buffer, sizeof(oform_buffer), "%%.%df", atoi(*++argv));
                 oform = oform_buffer;
                 break;
               case 'r': /* reverse input */

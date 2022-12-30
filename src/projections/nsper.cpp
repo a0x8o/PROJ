@@ -1,4 +1,4 @@
-#define PJ_LIB__
+#define PJ_LIB_
 #include <errno.h>
 #include "proj.h"
 #include "proj_internal.h"
@@ -81,7 +81,7 @@ static PJ_XY nsper_s_forward (PJ_LP lp, PJ *P) {           /* Spheroidal, forwar
         break;
     case N_POLE:
         coslam = - coslam;
-        /*-fallthrough*/
+        PROJ_FALLTHROUGH;
     case S_POLE:
         xy.y *= cosphi * coslam;
         break;

@@ -34,6 +34,9 @@
 #define EPSG_NAME_METHOD_TRANSVERSE_MERCATOR "Transverse Mercator"
 #define EPSG_CODE_METHOD_TRANSVERSE_MERCATOR 9807
 
+#define EPSG_NAME_METHOD_TRANSVERSE_MERCATOR_3D "Transverse Mercator (3D)"
+#define EPSG_CODE_METHOD_TRANSVERSE_MERCATOR_3D 1111
+
 #define EPSG_NAME_METHOD_TRANSVERSE_MERCATOR_SOUTH_ORIENTATED \
     "Transverse Mercator (South Orientated)"
 #define EPSG_CODE_METHOD_TRANSVERSE_MERCATOR_SOUTH_ORIENTATED 9808
@@ -244,6 +247,9 @@
 
 #define EPSG_CODE_METHOD_COLOMBIA_URBAN 1052
 #define EPSG_NAME_METHOD_COLOMBIA_URBAN "Colombia Urban"
+
+#define PROJ_WKT2_NAME_METHOD_PEIRCE_QUINCUNCIAL_SQUARE "Peirce Quincuncial (Square)"
+#define PROJ_WKT2_NAME_METHOD_PEIRCE_QUINCUNCIAL_DIAMOND "Peirce Quincuncial (Diamond)"
 
 /* ------------------------------------------------------------------------ */
 
@@ -549,6 +555,10 @@
 #define EPSG_NAME_PARAMETER_GEOCENTRIC_TRANSLATION_FILE \
     "Geocentric translation file"
 
+#define EPSG_NAME_PARAMETER_EPSG_CODE_FOR_INTERPOLATION_CRS \
+    "EPSG code for Interpolation CRS"
+#define EPSG_CODE_PARAMETER_EPSG_CODE_FOR_INTERPOLATION_CRS 1048
+
 /* ------------------------------------------------------------------------ */
 
 #define PROJ_WKT2_NAME_METHOD_HEIGHT_TO_GEOG3D \
@@ -557,6 +567,11 @@
 #define PROJ_WKT2_NAME_METHOD_CTABLE2 "CTABLE2"
 
 #define PROJ_WKT2_NAME_METHOD_HORIZONTAL_SHIFT_GTIFF "HORIZONTAL_SHIFT_GTIFF"
+
+#define PROJ_WKT2_NAME_METHOD_GENERAL_SHIFT_GTIFF "GENERAL_SHIFT_GTIFF"
+
+#define PROJ_WKT2_PARAMETER_LATITUDE_LONGITUDE_ELLIPOISDAL_HEIGHT_DIFFERENCE_FILE \
+    "Latitude, longitude and ellipsoidal height difference file"
 
 /* ------------------------------------------------------------------------ */
 
@@ -576,6 +591,9 @@
 #define EPSG_CODE_METHOD_VERTICALGRID_PL_TXT 1101
 #define EPSG_NAME_METHOD_VERTICALGRID_PL_TXT "Vertical Offset by Grid Interpolation (PL txt)"
 
+#define EPSG_CODE_METHOD_VERTICALGRID_NRCAN_BYN 1112
+#define EPSG_NAME_METHOD_VERTICALGRID_NRCAN_BYN "Vertical Offset by Grid Interpolation (NRCan byn)"
+
 #define EPSG_NAME_PARAMETER_VERTICAL_OFFSET_FILE "Vertical offset file"
 #define EPSG_CODE_PARAMETER_VERTICAL_OFFSET_FILE 8732
 
@@ -590,6 +608,15 @@
 #define \
     EPSG_NAME_PARAMETER_LONGITUDE_DIFFERENCE_FILE "Longitude difference file"
 #define EPSG_CODE_PARAMETER_LONGITUDE_DIFFERENCE_FILE 8658
+
+#define EPSG_CODE_METHOD_NADCON5_2D 1074
+#define EPSG_NAME_METHOD_NADCON5_2D "NADCON5 (2D)"
+
+#define EPSG_NAME_PARAMETER_ELLIPSOIDAL_HEIGHT_DIFFERENCE_FILE "Ellipsoidal height difference file"
+#define EPSG_CODE_PARAMETER_ELLIPSOIDAL_HEIGHT_DIFFERENCE_FILE 1058
+
+#define EPSG_CODE_METHOD_NADCON5_3D 1075
+#define EPSG_NAME_METHOD_NADCON5_3D "NADCON5 (3D)"
 
 /* ------------------------------------------------------------------------ */
 
@@ -609,6 +636,9 @@
 
 #define EPSG_CODE_METHOD_VERTICAL_OFFSET 9616
 #define EPSG_NAME_METHOD_VERTICAL_OFFSET "Vertical Offset"
+
+#define EPSG_CODE_METHOD_VERTICAL_OFFSET_AND_SLOPE 1046
+#define EPSG_NAME_METHOD_VERTICAL_OFFSET_AND_SLOPE "Vertical Offset and Slope"
 
 #define EPSG_CODE_METHOD_GEOGRAPHIC2D_OFFSETS 9619
 #define EPSG_NAME_METHOD_GEOGRAPHIC2D_OFFSETS "Geographic2D offsets"
@@ -635,6 +665,15 @@
 
 #define EPSG_NAME_PARAMETER_GEOID_UNDULATION "Geoid undulation"
 #define EPSG_CODE_PARAMETER_GEOID_UNDULATION 8604
+
+#define EPSG_NAME_PARAMETER_INCLINATION_IN_LATITUDE "Inclination in latitude"
+#define EPSG_CODE_PARAMETER_INCLINATION_IN_LATITUDE 8730
+
+#define EPSG_NAME_PARAMETER_INCLINATION_IN_LONGITUDE "Inclination in longitude"
+#define EPSG_CODE_PARAMETER_INCLINATION_IN_LONGITUDE 8731
+
+#define EPSG_NAME_PARAMETER_EPSG_CODE_FOR_HORIZONTAL_CRS "EPSG code for Horizontal CRS"
+#define EPSG_CODE_PARAMETER_EPSG_CODE_FOR_HORIZONTAL_CRS 1037
 
 /* ------------------------------------------------------------------------ */
 

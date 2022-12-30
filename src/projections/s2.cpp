@@ -47,11 +47,18 @@
  * https://github.com/google/s2geometry/blob/0c4c460bdfe696da303641771f9def900b3e440f/src/s2/util/math/vector.h
  ****************************************************************************/
 
-#define PJ_LIB__
-#define _USE_MATH_DEFINES  // needed for M_1_PI availability with MSVC
+#define PJ_LIB_
+
+/* enable predefined math constants M_* for MS Visual Studio */
+#if defined(_MSC_VER) || defined(_WIN32)
+#  ifndef _USE_MATH_DEFINES
+#     define _USE_MATH_DEFINES
+#  endif
+#endif
 
 #include <errno.h>
 #include <cmath>
+#include <cstdint>
 
 #include "proj.h"
 #include "proj_internal.h"
@@ -69,7 +76,7 @@ enum Face {
 } // anonymous namespace
 
 enum S2ProjectionType {Linear, Quadratic, Tangent, NoUVtoST};
-std::map<std::string, S2ProjectionType> stringToS2ProjectionType { {"linear", Linear}, {"quadratic", Quadratic}, {"tangent", Tangent}, {"none", NoUVtoST} };
+static std::map<std::string, S2ProjectionType> stringToS2ProjectionType { {"linear", Linear}, {"quadratic", Quadratic}, {"tangent", Tangent}, {"none", NoUVtoST} };
 
 namespace { // anonymous namespace
 struct pj_opaque {
@@ -81,8 +88,6 @@ struct pj_opaque {
 };
 } // anonymous namespace
 PROJ_HEAD(s2, "S2") "\n\tMisc, Sph&Ell";
-
-#define EPS10 1.e-10
 
 /* The four areas on a cube face. AREA_0 is the area of definition,
  * the other three areas are counted counterclockwise. */

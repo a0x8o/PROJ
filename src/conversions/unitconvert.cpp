@@ -63,7 +63,7 @@ Last update: 2017-05-16
 *
 ***********************************************************************/
 
-#define PJ_LIB__
+#define PJ_LIB_
 
 #include <errno.h>
 #include <math.h>
@@ -252,21 +252,22 @@ static double yyyymmdd_to_mjd(double yyyymmdd) {
 /***********************************************************************/
 static double mjd_to_yyyymmdd(double mjd) {
 /************************************************************************
-    Date given in YYYY-MM-DD format.
+    Date returned in YYYY-MM-DD format.
 ************************************************************************/
-    double mjd_iter = 14 + 31;
-    int year = 1859, month=0, day=0;
+    unsigned int date_iter = 14 + 31;
+    unsigned int year = 1859, month = 0, day = 0;
+    unsigned int date = (int) lround(mjd);
 
-    for (; mjd >= mjd_iter; year++) {
-        mjd_iter += days_in_year(year);
+    for (; date >= date_iter; year++) {
+        date_iter += days_in_year(year);
     }
     year--;
-    mjd_iter -= days_in_year(year);
+    date_iter -= days_in_year(year);
 
-    for (month=1; mjd_iter + days_in_month(year, month) <= mjd; month++)
-        mjd_iter += days_in_month(year, month);
+    for (month=1; date_iter + days_in_month(year, month) <= date; month++)
+        date_iter += days_in_month(year, month);
 
-    day = (int)(mjd - mjd_iter + 1);
+    day = date - date_iter + 1;
 
     return year*10000.0 + month*100.0 + day;
 }
@@ -350,42 +351,36 @@ static PJ_LPZ reverse_3d(PJ_XYZ xyz, PJ *P) {
 
 
 /***********************************************************************/
-static PJ_COORD forward_4d(PJ_COORD obs, PJ *P) {
+static void forward_4d(PJ_COORD& coo, PJ *P) {
 /************************************************************************
     Forward conversion of time units
 ************************************************************************/
     struct pj_opaque_unitconvert *Q = (struct pj_opaque_unitconvert *) P->opaque;
-    PJ_COORD out = obs;
 
     /* delegate unit conversion of physical dimensions to the 3D function */
-    out.xyz = forward_3d(obs.lpz, P);
+    coo.xyz = forward_3d(coo.lpz, P);
 
     if (Q->t_in_id >= 0)
-        out.xyzt.t = time_units[Q->t_in_id].t_in( obs.xyzt.t );
+        coo.xyzt.t = time_units[Q->t_in_id].t_in( coo.xyzt.t );
     if (Q->t_out_id >= 0)
-        out.xyzt.t = time_units[Q->t_out_id].t_out( out.xyzt.t );
-
-    return out;
+        coo.xyzt.t = time_units[Q->t_out_id].t_out( coo.xyzt.t );
 }
 
 
 /***********************************************************************/
-static PJ_COORD reverse_4d(PJ_COORD obs, PJ *P) {
+static void reverse_4d(PJ_COORD& coo, PJ *P) {
 /************************************************************************
     Reverse conversion of time units
 ************************************************************************/
     struct pj_opaque_unitconvert *Q = (struct pj_opaque_unitconvert *) P->opaque;
-    PJ_COORD out = obs;
 
     /* delegate unit conversion of physical dimensions to the 3D function */
-    out.lpz = reverse_3d(obs.xyz, P);
+    coo.lpz = reverse_3d(coo.xyz, P);
 
     if (Q->t_out_id >= 0)
-        out.xyzt.t = time_units[Q->t_out_id].t_in( obs.xyzt.t );
+        coo.xyzt.t = time_units[Q->t_out_id].t_in( coo.xyzt.t );
     if (Q->t_in_id >= 0)
-        out.xyzt.t = time_units[Q->t_in_id].t_out( out.xyzt.t );
-
-    return out;
+        coo.xyzt.t = time_units[Q->t_in_id].t_out( coo.xyzt.t );
 }
 
 /***********************************************************************/

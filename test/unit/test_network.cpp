@@ -131,9 +131,8 @@ TEST(networking, basic) {
 
 #ifdef CURL_ENABLED
     // enable through env variable
-    ctx = proj_context_create();
-    proj_grid_cache_set_enable(ctx, false);
     putenv(const_cast<char *>("PROJ_NETWORK=ON"));
+    ctx = proj_context_create();
     P = proj_create(ctx, pipeline);
     if (networkAccessOK) {
         ASSERT_NE(P, nullptr);
@@ -1110,13 +1109,13 @@ TEST(networking, curl_hgridshift) {
     proj_grid_cache_set_enable(ctx, false);
     proj_context_set_enable_network(ctx, true);
 
-    // NAD83 to NAD83(HARN) in West-Virginia. Using wvhpgn.tif
-    auto P = proj_create_crs_to_crs(ctx, "EPSG:4269", "EPSG:4152", nullptr);
+    // NTF to RGF93 v1. Using fr_ign_gr3df97a.tif
+    auto P = proj_create_crs_to_crs(ctx, "EPSG:4275", "EPSG:4171", nullptr);
     ASSERT_NE(P, nullptr);
 
     PJ_COORD c;
-    c.xyz.x = 40;  // lat
-    c.xyz.y = -80; // lon
+    c.xyz.x = 49; // lat
+    c.xyz.y = 2;  // lon
     c.xyz.z = 0;
     c = proj_trans(P, PJ_FWD, c);
 
@@ -1125,8 +1124,8 @@ TEST(networking, curl_hgridshift) {
     proj_destroy(P);
     proj_context_destroy(ctx);
 
-    EXPECT_NEAR(c.xyz.x, 39.99999839, 1e-8);
-    EXPECT_NEAR(c.xyz.y, -79.99999807, 1e-8);
+    EXPECT_NEAR(c.xyz.x, 48.9999322600, 1e-8);
+    EXPECT_NEAR(c.xyz.y, 1.9992776848, 1e-8);
     EXPECT_NEAR(c.xyz.z, 0, 1e-2);
 }
 
@@ -1147,7 +1146,7 @@ TEST(networking, curl_vgridshift) {
 
     // WGS84 to EGM2008 height. Using egm08_25.tif
     auto P =
-        proj_create_crs_to_crs(ctx, "EPSG:4326", "EPSG:4326+3855", nullptr);
+        proj_create_crs_to_crs(ctx, "EPSG:4979", "EPSG:4326+3855", nullptr);
     ASSERT_NE(P, nullptr);
 
     PJ_COORD c;
@@ -1642,6 +1641,14 @@ TEST(networking, download_whole_files) {
     putenv(const_cast<char *>("PROJ_SKIP_READ_USER_WRITABLE_DIRECTORY="));
     putenv(const_cast<char *>("PROJ_USER_WRITABLE_DIRECTORY=./proj_test_tmp"));
     putenv(const_cast<char *>("PROJ_FULL_FILE_CHUNK_SIZE=100000"));
+
+    proj_context_set_enable_network(nullptr, true);
+    const auto grid_info = proj_grid_info("dk_sdfe_dvr90.tif");
+    EXPECT_EQ(std::string(grid_info.filename), "");
+    EXPECT_EQ(std::string(grid_info.gridname), "dk_sdfe_dvr90.tif");
+    EXPECT_EQ(std::string(grid_info.format), "gtiff");
+    proj_context_set_enable_network(nullptr, false);
+
     auto ctx = proj_context_create();
     proj_context_set_enable_network(ctx, true);
 
@@ -1915,6 +1922,101 @@ TEST(networking, file_api) {
     unlink("proj_test_tmp/cache.db");
     unlink("proj_test_tmp/dk_sdfe_dvr90.tif");
     rmdir("proj_test_tmp");
+}
+
+#endif
+
+// ---------------------------------------------------------------------------
+
+#ifdef CURL_ENABLED
+
+TEST(networking, proj_coordoperation_get_grid_used) {
+    if (!networkAccessOK) {
+        return;
+    }
+
+    auto ctx = proj_context_create();
+    proj_grid_cache_set_enable(ctx, false);
+    proj_context_set_enable_network(ctx, true);
+
+    // Test bugfix for
+    // https://github.com/OSGeo/PROJ/issues/3444#issuecomment-1309499342
+    for (int i = 0; i < 2; ++i) {
+        // This file is not in grid_alternatives, but in the CDN
+        const char *proj_string =
+            "proj=vgridshift grids=nz_linz_nzgd2000-c120100904-grid01.tif";
+        PJ *P = proj_create(ctx, proj_string);
+
+        const char *shortName = nullptr;
+        const char *fullName = nullptr;
+        const char *packageName = nullptr;
+        const char *url = nullptr;
+        int directDownload = 0;
+        int openLicense = 0;
+        int available = 0;
+
+        proj_coordoperation_get_grid_used(ctx, P, 0, &shortName, &fullName,
+                                          &packageName, &url, &directDownload,
+                                          &openLicense, &available);
+
+        EXPECT_EQ(std::string(shortName),
+                  "nz_linz_nzgd2000-c120100904-grid01.tif");
+        EXPECT_EQ(std::string(fullName), "");
+        EXPECT_EQ(
+            std::string(url),
+            "https://cdn.proj.org/nz_linz_nzgd2000-c120100904-grid01.tif");
+
+        proj_destroy(P);
+    }
+
+    proj_context_destroy(ctx);
+}
+
+#endif
+
+// ---------------------------------------------------------------------------
+
+#ifdef CURL_ENABLED
+
+TEST(networking, pyproj_issue_1192) {
+    if (!networkAccessOK) {
+        return;
+    }
+
+    const auto doTest = [](PJ_CONTEXT *ctxt) {
+        auto factory_context =
+            proj_create_operation_factory_context(ctxt, nullptr);
+        proj_operation_factory_context_set_grid_availability_use(
+            ctxt, factory_context, PROJ_GRID_AVAILABILITY_IGNORED);
+        proj_operation_factory_context_set_spatial_criterion(
+            ctxt, factory_context, PROJ_SPATIAL_CRITERION_PARTIAL_INTERSECTION);
+        auto from = proj_create(ctxt, "EPSG:4326");
+        auto to = proj_create(ctxt, "EPSG:2964");
+        auto pj_operations =
+            proj_create_operations(ctxt, from, to, factory_context);
+        proj_destroy(from);
+        proj_destroy(to);
+        auto num_operations = proj_list_get_count(pj_operations);
+        for (int i = 0; i < num_operations; ++i) {
+            PJ *P = proj_list_get(ctxt, pj_operations, i);
+            int is_instantiable = proj_coordoperation_is_instantiable(ctxt, P);
+            if (is_instantiable) {
+                EXPECT_TRUE(proj_pj_info(P).id != nullptr);
+            }
+            proj_destroy(P);
+        }
+        proj_operation_factory_context_destroy(factory_context);
+        proj_list_destroy(pj_operations);
+    };
+
+    auto ctx = proj_context_create();
+    proj_grid_cache_set_enable(ctx, false);
+    proj_context_set_enable_network(ctx, true);
+    doTest(ctx);
+    proj_context_set_enable_network(ctx, false);
+    doTest(ctx);
+
+    proj_context_destroy(ctx);
 }
 
 #endif

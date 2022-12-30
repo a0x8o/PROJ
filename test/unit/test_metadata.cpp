@@ -279,6 +279,35 @@ TEST(metadata, extent) {
 
 // ---------------------------------------------------------------------------
 
+TEST(metadata, extent_edge_cases) {
+    Extent::create(
+        optional<std::string>(), std::vector<GeographicExtentNNPtr>(),
+        std::vector<VerticalExtentNNPtr>(), std::vector<TemporalExtentNNPtr>());
+
+    auto A = Extent::createFromBBOX(-180, -90, 180, 90);
+    auto B = Extent::createFromBBOX(180, -90, 180, 90);
+    EXPECT_FALSE(A->intersects(B));
+    EXPECT_FALSE(B->intersects(A));
+    EXPECT_FALSE(A->contains(B));
+    EXPECT_TRUE(A->intersection(B) == nullptr);
+    EXPECT_TRUE(B->intersection(A) == nullptr);
+
+    EXPECT_THROW(Extent::createFromBBOX(
+                     std::numeric_limits<double>::quiet_NaN(), -90, 180, 90),
+                 InvalidValueTypeException);
+    EXPECT_THROW(Extent::createFromBBOX(
+                     -180, std::numeric_limits<double>::quiet_NaN(), 180, 90),
+                 InvalidValueTypeException);
+    EXPECT_THROW(Extent::createFromBBOX(
+                     -180, -90, std::numeric_limits<double>::quiet_NaN(), 90),
+                 InvalidValueTypeException);
+    EXPECT_THROW(Extent::createFromBBOX(
+                     -180, -90, 180, std::numeric_limits<double>::quiet_NaN()),
+                 InvalidValueTypeException);
+}
+
+// ---------------------------------------------------------------------------
+
 TEST(metadata, identifier_empty) {
     auto id(Identifier::create());
     Identifier id2(*id);
@@ -383,16 +412,29 @@ TEST(metadata, id) {
 // ---------------------------------------------------------------------------
 
 TEST(metadata, Identifier_isEquivalentName) {
+    EXPECT_TRUE(Identifier::isEquivalentName("", ""));
+    EXPECT_TRUE(Identifier::isEquivalentName("x", "x"));
+    EXPECT_TRUE(Identifier::isEquivalentName("x", "X"));
+    EXPECT_TRUE(Identifier::isEquivalentName("X", "x"));
+    EXPECT_FALSE(Identifier::isEquivalentName("x", ""));
+    EXPECT_FALSE(Identifier::isEquivalentName("", "x"));
+    EXPECT_FALSE(Identifier::isEquivalentName("x", "y"));
     EXPECT_TRUE(Identifier::isEquivalentName("Central_Meridian",
                                              "Central_- ()/Meridian"));
 
     EXPECT_TRUE(Identifier::isEquivalentName("\xc3\xa1", "a"));
+    EXPECT_FALSE(Identifier::isEquivalentName("\xc3", "a"));
 
     EXPECT_TRUE(Identifier::isEquivalentName("a", "\xc3\xa1"));
+    EXPECT_FALSE(Identifier::isEquivalentName("a", "\xc3"));
 
     EXPECT_TRUE(Identifier::isEquivalentName("\xc3\xa4", "\xc3\xa1"));
 
     EXPECT_TRUE(Identifier::isEquivalentName(
         "Unknown based on International 1924 (Hayford 1909, 1910) ellipsoid",
         "Unknown_based_on_International_1924_Hayford_1909_1910_ellipsoid"));
+
+    EXPECT_TRUE(Identifier::isEquivalentName("foo + ", "foo + "));
+    EXPECT_TRUE(Identifier::isEquivalentName("foo + bar", "foo + bar"));
+    EXPECT_TRUE(Identifier::isEquivalentName("foo + bar", "foobar"));
 }
